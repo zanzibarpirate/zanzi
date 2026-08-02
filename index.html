@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Surveying CBT Simulator</title>
+<style>
+  :root {
+    --ink: #1c2430; --ink-soft: #52606d; --line: #dfe4ea;
+    --paper: #ffffff; --paper-soft: #f7f8fa;
+    --orange: #c8622a; --orange-soft: #fbeee4;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin:0; padding:0; background: var(--paper-soft); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+  .wrap { max-width: 560px; margin: 8vh auto 0; padding: 0 20px; }
+  .card { background: var(--paper); border: 1px solid var(--line); border-radius: 12px; padding: 36px; }
+  h1 { font-size: 20px; margin: 0 0 6px; }
+  p.sub { color: var(--ink-soft); font-size: 13.5px; margin: 0 0 26px; }
+  .examlink {
+    display:flex; align-items:center; justify-content:space-between;
+    padding: 14px 16px; border: 1.5px solid var(--line); border-radius: 9px;
+    margin-bottom: 9px; text-decoration:none; color: var(--ink); font-weight: 700; font-size: 14.5px;
+  }
+  .examlink:hover { border-color: var(--orange); background: var(--orange-soft); }
+  .examlink .go { color: var(--orange); font-weight: 700; font-size: 13px; }
+  .examlink.disabled { opacity: 0.4; pointer-events: none; }
+  .examlink.disabled .go { color: var(--ink-soft); }
+  .watermark { margin-top: 26px; padding-top: 14px; border-top: 1px solid var(--line);
+    text-align:center; font-size: 12px; font-weight: 700; color: var(--ink-soft); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card">
+    <h1>Surveying CBT Simulator</h1>
+    <p class="sub">Choose an exam. 55 questions each, opens in a new tab.</p>
+    <a class="examlink" href="Exam1_CBT_Simulator.html" target="_blank">Exam 1<span class="go">Open &rarr;</span></a>
+    <a class="examlink" href="Exam2_CBT_Simulator.html" target="_blank">Exam 2<span class="go">Open &rarr;</span></a>
+    <a class="examlink" href="Exam3_CBT_Simulator.html" target="_blank">Exam 3<span class="go">Open &rarr;</span></a>
+    <a class="examlink" href="Exam4_CBT_Simulator.html" target="_blank">Exam 4<span class="go">Open &rarr;</span></a>
+    <a class="examlink" href="Exam5_CBT_Simulator.html" target="_blank">Exam 5<span class="go">Open &rarr;</span></a>
+    <a class="examlink" href="Exam6_CBT_Simulator.html" target="_blank">Exam 6<span class="go">Open &rarr;</span></a>
+    <a class="examlink" href="Exam7_CBT_Simulator.html" target="_blank">Exam 7<span class="go">Open &rarr;</span></a>
+    <a class="examlink" href="Exam8_CBT_Simulator.html" target="_blank">Exam 8<span class="go">Open &rarr;</span></a>
+    <a class="examlink" href="Exam9_CBT_Simulator.html" target="_blank">Exam 9<span class="go">Open &rarr;</span></a>
+    <div class="watermark">Designed &amp; Compiled by Azhar Latif</div>
+  </div>
+</div>
+</body>
+</html>

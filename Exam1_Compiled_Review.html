@@ -14,8 +14,21 @@
   .choices-list li{padding:5px 0 5px 4px;border-bottom:1px solid #eee;}
   .choices-list li:last-child{border-bottom:none;}
   .choice-letter{font-weight:bold;display:inline-block;min-width:22px;color:#8a6d3b;}
+  .sol-block{background:#faf9f6;border-left:4px solid #8a6d3b;border-radius:0 8px 8px 0;padding:10px 16px;margin:10px 0;}
+  .sol-label{font-weight:bold;color:#8a6d3b;margin:10px 0 4px;font-size:.85rem;}
+  .sol-label:first-child{margin-top:0;}
+  .sol-formula{margin:2px 0 2px 12px;font-size:.92rem;}
 
-  .katex{font-size:1.3em !important;}
+  .sol-steps{margin:6px 0;}
+  .sol-step-label{font-weight:bold;color:#444;margin-top:12px;display:block;font-size:16px;}
+  .sol-step-formula{display:block;margin:4px 0 10px 10px;font-family:Tahoma,Arial,sans-serif;font-size:20px;}
+
+  .sol-table{border-collapse:collapse;margin:10px 0;font-size:16px;}
+  .sol-table td,.sol-table th{border:1px solid #999;padding:4px 10px;text-align:center;}
+  .user-note{font-size:.85rem;color:#8a6d3b;background:#fdf6e8;border-left:3px solid #d99a4b;padding:8px 12px;margin:10px 0;font-style:italic;}
+  .diagram{max-width:100%;border:1px solid #eee;border-radius:6px;margin:8px 0;}
+
+  .katex{font-size:1em !important;}
   .katex-display{margin:0.3em 0 !important;}
 </style>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css">
@@ -492,7 +505,7 @@ document.addEventListener("DOMContentLoaded", function() {
 <span class="sol-step-label">Error of closure:</span>
 <span class="sol-step-formula">Error of closure = √(0.79²+0.49²) = 0.93 ft</span>
 <span class="sol-step-label">5649.2/0.93:</span>
-<span class="sol-step-formula">\(\dfrac{5649.2}{0.93}\)= 6074 → accuracy ≈ 1/6100. Same as the FS-exam ratio-of-error questions — Program A's misclosure output gives this distance directly if the traverse is entered as a full set of sides.</span>
+<span class="sol-step-formula">\(\dfrac{5649.2}{0.93}\) = 6074 → accuracy ≈ \(\dfrac{1}{6100}\). Same as the FS-exam ratio-of-error questions — Program A's misclosure output gives this distance directly if the traverse is entered as a full set of sides.</span>
 </div><br>
 <span class="ans">Answer: C</span></div>
 

@@ -1,6 +1,6 @@
 # CA PE Civil Surveying CBT — Project Status
 
-Last updated: August 18, 2026 (Exam5 transcription + merge session)
+Last updated: August 18, 2026 (Exam6 transcription session, in progress)
 
 Read this first, before touching anything. It exists so a new chat session
 doesn't have to reconstruct project history from scratch or accidentally
@@ -178,6 +178,33 @@ CPESR-Exam5 55).
   nudge modal when starting with zero filters selected
 - ✅ Mandatory splash screen + Bismillah header graphic + credit line, per
   owner's request
+
+- 🟡 Exam6: **transcription started** (6/55 questions done: Q1-Q6), not yet
+  merged into the simulator. Source for this exam is a set of 100 owner-
+  provided screenshots (`CSPER-_Exam6_Screenshots_2026-08-17_233146.zip`) of
+  the live CivilPESurveyingReview.com review site, one (occasionally two,
+  for longer solutions) screenshot per question, in strict chronological/
+  question-number order — confirmed by OCR spot-check across the full set.
+  This is a cleaner source than prior exams: stem, choices, correct-answer
+  marking, and a typed answer explanation (with inline equations) are all
+  directly legible, so less reconstruction-from-scan-images work is needed
+  than Exam4/5. The underlying `Exam6_CBT_Simulator.html` also has the
+  usual embedded `EXAM_DATA` (`<script id="exam-data">`) with 55 question/
+  solution JPEGs, available as a fallback/cross-check source.
+  - Diagrams embedded so far: Q1 (lot area sector diagram), Q4 (profile
+    leveling field-note table, both blank-stem and answer-filled versions).
+  - Topic tags applied are a first-pass best guess (`hc`, `gis`, `level`,
+    `meas`, `theory`) — not yet cross-checked against the established
+    taxonomy the way Exam1-4's tags were audited; treat as unverified until
+    a dedicated tag-audit pass, same caveat as new exams historically.
+  - Q7 (mass-diagram balance-point problem) has a long multi-step solution
+    with two diagrams (profile + mass diagram) and was deferred rather than
+    rushed — pick that up next.
+  - KaTeX (17 expressions), div-balance, and dfrac-blind-spot checks all
+    passed clean for the Q1-Q6 batch. Checkpointed to
+    `Exam6_Compiled_Review.html` in outputs; **not yet in the repo** — needs
+    the owner to pull this file down and place/merge it, or a future session
+    with push access.
 
 **Not yet started:**
 - Exams 6–9: raw source files already exist in the repo

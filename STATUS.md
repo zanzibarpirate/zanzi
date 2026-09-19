@@ -1,6 +1,6 @@
 # CA PE Civil Surveying CBT — Project Status
 
-Last updated: August 23, 2026 (CPESR-Timed1 transcription session, complete)
+Last updated: September 18, 2026 (PassPE-2026-1 transcription session, complete)
 
 Read this first, before touching anything. It exists so a new chat session
 doesn't have to reconstruct project history from scratch or accidentally
@@ -38,13 +38,110 @@ duplicate/undo work another session already did.
 
 ## Current state (as of last push)
 
-**`unified_simulator.html`** — 775 questions total (FS-AM 85, FS-PM 85,
+**`unified_simulator.html`** — 835 questions total (FS-AM 85, FS-PM 85,
 CPESR-Exam1 55, CPESR-Exam2 55, CPESR-Exam3 55, CPESR-Exam4 55,
 CPESR-Exam5 55, CPESR-Exam6 55, CPESR-Exam7 55, CPESR-Exam8 55,
-CPESR-Exam9 55, Chelapati-17 55, CPESR-Timed1 55). Zero duplicate ids
-confirmed across the full set; max id 30055. **CPESR Exams 1–9 and
-Chelapati-17 remain complete; a new source track (CPESR-Timed1) was added
-this session — see below.**
+CPESR-Exam9 55, Chelapati-17 55, CPESR-Timed1 55, PassPE-2026-1 60). Zero
+duplicate ids confirmed across the full set; max id 40060. **CPESR
+Exams 1–9, Chelapati-17, and CPESR-Timed1 remain complete; a new source
+track (PassPE-2026-1) was added this session — see below. CPESR-Untimed1
+is still the next planned workstream (unaffected by this session — see
+"Not yet started" and the kickoff prompt at the end of this file).**
+
+- ✅ **PassPE-2026-1: new source track, transcribed from scratch and
+  merged** (60/60 questions, new ids 40001–40060). Source: two
+  owner-provided PDFs from passpe.com (Dr. Shahin A. Mansour, PE),
+  "Challenging Surveying Exam #1" (PassPE 2026 edition) — a clean
+  problem-only PDF (machine text layer, used for verbatim stem/choice
+  transcription and diagram cropping) and a handwritten worked-solutions
+  PDF. This is the project's first source from passpe.com (distinct from
+  both the CivilPESurveyingReview.com/CPESR track and the Chelapati book
+  track). Chosen `source` tag: `PassPE-2026-1`; id range 40001–40060,
+  deliberately a separate block from CPESR (1–30055) and Chelapati
+  (20001–20055) so a future PassPE exam could get its own 41001+, etc.
+  without colliding — also clear of the CPESR-Untimed1 block already
+  reserved at 31001–31055.
+  Notable characteristics of this session's work:
+  - Stems and choices transcribed verbatim from the clean problem PDF's
+    text layer (not OCR'd from images), giving high transcription
+    confidence for that part.
+  - 12 diagrams cropped from the clean problem PDF's page rasters (slope-
+    stake notation tables ×2 variants shared across Q1–5/Q31–32 and
+    Q49–50, a triangle-parcel figure, a sewer profile, two contour maps,
+    a traverse diagram, a typical roadway section, a parcel diagram, and
+    two solid-figure earthwork diagrams) — each viewed and verified before
+    embedding per §6. One additional derivation-only sketch (the dimensioned
+    cross-section used to work Q1–5/Q31–32) was cropped from the
+    **handwritten solutions PDF** (not the clean problem PDF) since the
+    source's own solution key relies on it and it isn't repeated on every
+    question page — embedded as a solution-only diagram, not duplicated
+    into the question diagram, per §6's "never duplicate a question's
+    diagram into its solution" rule (this is the reverse case: a solution
+    diagram not present on the question page).
+  - Genuine data tables (traverse coordinates, stadia readings, level
+    notes) transcribed as real `<table>` markup, not images, per §6.
+  - Every answer independently verified by calculation before
+    transcription. All 60 match the source's own marked/circled choice
+    **except** where flagged below.
+  - **4 questions had no worked solution in the source PDF — only a
+    circled answer choice** (Q34 curve-arc-length, Q57 parcel-course
+    length, Q59 solid-figure volume, and implicitly Q60 which *was*
+    worked and was used to back-solve Q59). Treated per the established
+    Exam4 Q11/Q23 and Chelapati precedent: independently derived,
+    verified against the marked answer, and disclosed with a `Flagged
+    item:` note in each. Q34's independent derivation (~214.5 ft) doesn't
+    land exactly on the source's marked choice (C, 214.92 ft) — this
+    discrepancy is disclosed explicitly rather than silently reconciled,
+    same treatment as the Exam9 Q2 and Exam7 Q23 precedents.
+  - **Q51** or (ditch offset/slope-stake question) is solved in the
+    source by trial-and-error/back-substitution against the answer
+    choices rather than a forward derivation — that method is reproduced
+    faithfully rather than substituted with a cleaner derivation the
+    source didn't use.
+  - Standard validation suite all passed clean: 60 questions/60 answers,
+    div-balance (per-question and after full merge), 105 KaTeX
+    expressions, zero render failures (validated with the real `katex`
+    npm package), zero `\'` apostrophe-trap hits, zero `\"` arcsecond-trap
+    hits, zero `\dfrac` blind-spot hits (manual scan), zero stray Unicode
+    whitespace, zero duplicate ids post-merge (835 total, max id 40060).
+  - A **new failure mode was caught and fixed this session**: several
+    plain-language conceptual answers (e.g. "infrared light has a longer
+    wavelength than visible light") were initially wrapped in KaTeX math
+    delimiters along with the real formulas, which both mis-renders prose
+    as math and, in one case, caused a literal `%` character to be parsed
+    as a LaTeX comment. Fixed by introducing a plain-text (non-KaTeX)
+    variant of the solution-step span for non-formula conclusion lines —
+    worth adding to the formatting standard as a new item to watch for
+    (see suggested §3 addition below).
+  - **Also caught and fixed**: the `qimg` vs `qhtml` JSON field
+    distinction. `qimg` is expected to hold a bare base64 data-URI (the
+    render code wraps its own `<img>` tag around it); a full `<img
+    class="diagram" ...>` tag string belongs in `qhtml` instead. Several
+    "given data" diagrams (the slope-stake tables, stadia/level/
+    coordinate tables) were initially placed only inside the *solution*
+    HTML, which would have hidden essential problem data from the person
+    until after they answered — moved to `qhtml` so they display with the
+    question itself, and removed the resulting duplication from the
+    solution.
+  - Numeric-fingerprint duplicate scan against the (then) 775-question
+    baseline found only weak, generic round-number coincidences (100,
+    200, 1000, 1910, etc. — the multiplying-constant/typical-station
+    values common across many stadia and construction problems), none
+    investigated further, consistent with established policy.
+  - Built `PassPE2026-1_Compiled_Review.html`, the standalone review file
+    for this source, using the same head/CSS structure as
+    `Chelapati17_Compiled_Review.html`. Validated: 60/60 questions
+    present, div-balanced.
+  - Updated the one hardcoded string that needed it: landing subtitle
+    (now "FS (170) + CPESR Exam 1, 2, 3, 4, 5, 6, 7, 8 & 9 (495) +
+    Chelapati Ch.17 (55) + CPESR Timed 1 (55) + PassPE 2026 Challenging
+    Exam 1 (60) — 835 questions combined"). The "not loaded" placeholder
+    chip was not touched — unrelated to this source.
+- ✅ Exam1–9, Chelapati-17, and CPESR-Timed1: complete, no changes this
+  session — see prior versions of this file / git log for full detail.
+- ✅ Data-integrity: 775-question baseline (pre-PassPE-2026-1) previously
+  verified duplicate-free and gap-free; this session's merge preserved
+  that (835 total, zero duplicate ids, all div-balanced, all KaTeX clean).
 
 - ✅ **CPESR-Timed1: new source track, transcribed from scratch and
   merged** (55/55 questions, new ids 30001–30055). Source was an
@@ -132,12 +229,14 @@ this session — see below.**
   zero duplicate ids, all div-balanced, all KaTeX clean).
 
 **Not yet started:**
-- **CPESR-Untimed1 is the next workstream.** Owner-provided source:
-  `CPESR_UNTIMED_Test_1.pdf` (73 pages, same CivilPESurveyingReview.com
-  format as Timed1 — full worked solutions + Q&A threads). Planned id
-  block: 31001–31055 (leaving 30001–30055 for Timed1, matching the
-  spacing convention). A ready-to-paste kickoff prompt for this session is
-  included at the end of this file.
+- **CPESR-Untimed1 is still the next workstream** (unaffected by this
+  session). Owner-provided source: `CPESR_UNTIMED_Test_1.pdf` (73 pages,
+  same CivilPESurveyingReview.com format as Timed1 — full worked
+  solutions + Q&A threads). Planned id block: 31001–31055 (leaving
+  30001–30055 for Timed1 and 40001–40060 for PassPE-2026-1, both already
+  taken — matching the spacing convention). A ready-to-paste kickoff
+  prompt for this session is included at the end of this file (baseline
+  numbers in it have been updated to reflect PassPE-2026-1's merge).
 - **KaTeX JS-renderer gap — flagged, NOT fixed this session (see process
   rule 5 above).** While building the Timed1 standalone review file, it
   was noticed that `Exam6_Compiled_Review.html`, `Exam7_Compiled_Review.html`,
@@ -195,6 +294,15 @@ this session — see below.**
      acceptable stand-in.
   5. Chelapati-17 Q39 and Q13 — field-practice-convention questions with
      no way to verify by calculation, flagged as lower-confidence.
+  6. PassPE-2026-1 Q34 (curve arc length) — the source shows no worked
+     steps, only a circled answer (C, 214.92 ft); an independent
+     derivation lands closer to ~214.5 ft. The source's marked answer was
+     used, with the discrepancy disclosed in the question's `Flagged
+     item:` note — worth owner review if they have access to the
+     official solution method.
+  7. PassPE-2026-1 Q57 and Q59 — also had circled-only answers with no
+     worked steps; independently derived and verified to land on the
+     marked choice, flagged the same way as item 6.
 
 ---
 
@@ -208,10 +316,19 @@ this session — see below.**
   respective exam's content in the simulator
 - `Chelapati17_Compiled_Review.html` — standalone formatted review doc for
   the Chelapati-17 source (55/55 questions)
-- `CPESR-Timed1_Compiled_Review.html` — **new this session** — standalone
-  formatted review doc for CPESR-Timed1 (55/55 questions), same role as
-  the ExamN review docs above. Confirmed to include the full KaTeX
-  renderer (CSS + JS + auto-render script).
+- `CPESR-Timed1_Compiled_Review.html` — standalone formatted review doc
+  for CPESR-Timed1 (55/55 questions), same role as the ExamN review docs
+  above. Confirmed to include the full KaTeX renderer (CSS + JS +
+  auto-render script).
+- `PassPE2026-1_Compiled_Review.html` — **new this session** — standalone
+  formatted review doc for PassPE-2026-1 (60/60 questions), same role as
+  the other review docs. Built with the known-good KaTeX head (CSS + JS +
+  auto-render script + init call, copied from `Exam5_Compiled_Review.html`
+  after confirming `Chelapati17_Compiled_Review.html` — the file this
+  file's CSS block was otherwise based on — is one of the files missing
+  the JS renderer per the still-open "KaTeX JS-renderer gap" item below;
+  that gap was NOT fixed in the older files this session, only avoided in
+  the new one).
 - All raw CPESR-ExamN source material (Exams 1–9) has been consumed.
   `CPESR_UNTIMED_Test_1.pdf` is the next unprocessed raw source, supplied
   by the owner outside the repo (see kickoff prompt below for path).
@@ -241,12 +358,15 @@ This session's task: transcribe CPESR-Untimed1 from the attached
 CPESR_UNTIMED_Test_1.pdf (73 pages) into the simulator, following the
 exact same workflow used for CPESR-Timed1 (see STATUS.md's Timed1
 section for the reference case, including the \dfrac unit-label
-blind-spot pattern to watch for).
+blind-spot pattern to watch for, and the PassPE-2026-1 section for two
+more recently-caught gotchas: keep plain-language conceptual answers out
+of \( \) KaTeX delimiters, and remember qimg wants a bare data-URI while
+a full <img> tag belongs in qhtml).
 
 Scope for this session:
 1. Pull zanzibarpirate/zanzi fresh from GitHub first.
-2. Confirm baseline: unified_simulator.html should have 775 questions,
-   zero duplicate ids, max id 30055.
+2. Confirm baseline: unified_simulator.html should have 835 questions,
+   zero duplicate ids, max id 40060.
 3. Transcribe all 55 questions from CPESR_UNTIMED_Test_1.pdf verbatim
    (stems, solutions, diagrams, and any Q&A threads), using id block
    31001–31055 and source tag "CPESR-Untimed1".
@@ -254,11 +374,11 @@ Scope for this session:
    check + manual \dfrac blind-spot eyeball scan + \\'/\\" trap scan +
    div-balance), checkpoint, then continue.
 5. Run the numeric-fingerprint duplicate scan against the (by then)
-   775-question baseline once all 55 are built; log cross-exam matches,
+   835-question baseline once all 55 are built; log cross-exam matches,
    don't exclude them, per established policy.
 6. Merge into unified_simulator.html, update the landing-page subtitle
    (the only hardcoded string that needs it), and re-validate the merged
-   file (830 questions expected, zero duplicate ids).
+   file (890 questions expected, zero duplicate ids).
 7. Build CPESR-Untimed1_Compiled_Review.html as a standalone review file,
    copying the head/CSS/KaTeX-script block from a known-good file (e.g.
    Exam5_Compiled_Review.html or the new CPESR-Timed1_Compiled_Review.html)

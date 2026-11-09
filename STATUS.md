@@ -34,6 +34,43 @@ Last updated: November 8, 2026 (PassPE-497 import + BPELSG retag + weak-area dri
   ~40% previously-missed, rest fresh round-robin), "Retry missed", "Mock exam
   55 Q by BPELSG weights", export/import/reset of history. Default focus set
   per owner: PLSS, Earthwork, Photogrammetry, Topography, Construction staking.
+- **Missing question diagrams restored (follow-up, same day)** — owner caught
+  6008 (borrow pit) with no figure. Audit of CPESR Exams 3–6 against the
+  original screenshots found 64 questions whose diagram/table was missing
+  from the question view (Exam 6 had none at all; several had the figure only
+  inside the solution). Each was cropped from the original question
+  screenshot, viewed before embedding, and set as `qimg`. 3025 and 4025 were
+  skipped (data already transcribed in the stem). Exams 1–2 were audited in an
+  earlier session; 7–9/Timed1 have no source screenshots on hand — a stem-text
+  scan found no further obvious gaps there.
+- **Rebuild 2 (Nov 9, 2026)** — PassPE-497 rewrite batch 1: 201 problems
+  converted from scanned images to typed stems/choices + step-by-step worked
+  solutions (KaTeX, every computation re-run in Python and checked against
+  the book key) + "Shortcut / trap" box. Source scripts: build/batches/bNNN.py
+  → build/ppsol/NNN.json; figures re-cropped and verified → passpe497/f*.png.
+  Done: all Earthwork, Construction staking, PLSS, Photogrammetry, Topography
+  (user's weak areas) + Q5–Q31. Remaining ~285 still show the scanned page
+  (to be rewritten next, rebuild every ~200). Book errors flagged in-solution
+  (e.g. #404 choices don't contain the computed 1″≈1,494 ft; #118 book's
+  triangle width). New dups tagged: 148→106, 154→111.
+- PassPE-2026-1 Q1–5 and Q13: restored the question line that followed the
+  figure/table (was missing from the stem).
+- Figure sizing: diagrams now render at natural size (flex-stretch bug made
+  small images like the slope stake fill the column); max-height 460 px,
+  click to enlarge.
+- Review mode after Submit: results page has "Review answers & solutions" and
+  "Review wrong / skipped only"; every question shows correct/your answer +
+  full solution, answers locked, nav grid colored green/red/gray, "Wrong /
+  skipped only" toggle for Back/Next, "Back to results".
+- **Rebuild 3 (Nov 9, 2026)** — PassPE-497 rewrite: 407 of 486 unique problems
+  now typed with worked solutions (adds Q32–Q367 range: traverse, leveling,
+  taping corrections, errors/precision, curves, VCs, areas, DMD). More
+  same-source duplicates tagged (149→76, 150→101, 151→108, 155→61, 156→29,
+  159→31, 162→43, 163→44, 164→52, 242→12, 268→108, 299→493). Book issues
+  flagged in-solution: #139 (computed 2086.43 vs keyed 2086.57), #194 (book
+  uses horizontal coefficient for leveling), #209 (book's working ≠ its key),
+  #278 (easting digits transposed in choices), #296 (computed 4,492 vs keyed
+  4,690). Remaining ~79 still show the scanned page.
 - Totals: 1,332 questions (1,321 excluding known duplicates).
 
 ---

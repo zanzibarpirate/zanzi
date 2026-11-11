@@ -411,6 +411,17 @@ img.diagram{display:block;max-width:100%;border:1px solid var(--line);border-rad
 
 <style>
 #progress-panel{margin-bottom:18px}
+.lv{display:inline-block;padding:1px 8px;border-radius:10px;font-size:.78rem;font-weight:600;border:1px solid}
+.lv-new{background:#f2f2f2;color:#555;border-color:#ccc}.lv-learn{background:#fdeaea;color:#a12626;border-color:#e6a5a5}
+.lv-imp{background:#fff4dc;color:#8a5a00;border-color:#e8c77a}.lv-mast{background:#e5f4e6;color:#1f6b28;border-color:#9fd1a4}
+.pg-up{color:#1f6b28;font-size:.8rem}.pg-dn{color:#a12626;font-size:.8rem}.pg-days{color:#a12626}
+.pg-mini{padding:3px 8px;font-size:.78rem;border:1px solid #2f6db3;background:#fff;color:#1d4f86;border-radius:6px;cursor:pointer}
+.rs-why{max-width:150px;font-size:.8rem}.rs-topic{font-size:.78rem;color:#666}.rs-label{font-weight:400;color:#666;font-size:.9rem}
+.rs-hint{font-size:.85rem;color:#555;background:#fffbea;border:1px solid #eedc9a;padding:8px 10px;border-radius:6px}
+.cbt-toolbtn.rs-primary{background:#e8f1fb;border:1.5px solid #2f6db3;color:#1d4f86;font-weight:700}
+.rs-report{width:100%;height:220px;font:12px/1.4 monospace;margin-top:8px;background:#fafafa}
+.rs-copied{color:#1f6b28;font-weight:600;margin:10px 0 0}
+.cbt-results{overflow-x:auto}
 .pg-sub{font-size:.85rem;color:var(--sub,#555);margin:4px 0 10px}
 .pg-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:8px 0 14px}
 .pg-actions button{padding:9px 14px;border-radius:8px;cursor:pointer;font-size:.92rem}
@@ -1139,18 +1150,34 @@ document.getElementById('import-progress-btn').addEventListener('click', ()=>{
 document.getElementById('import-progress-input').addEventListener('change', cbtImportProgress);
 
 
-/* ===== Progress history + weak-area drill (added Nov 2026) ===== */
-const HIST_KEY = 'cesHistory_v1';
+/* ===== Adaptive practice engine v2 (Nov 2026): spaced review, topic proficiency, smart drill, miss reasons, reports ===== */
+const HIST_KEY = 'cesHistory_v1';      // per question: {a,c,last,lc, box,due,why,secs}
 const FOCUS_KEY = 'cesFocus_v1';
+const LOG_KEY  = 'cesLog_v1';          // attempts: [{id,ts,ok,s,topic,cat,sid,why}]
+const SESS_KEY = 'cesSessions_v1';     // sessions: [{sid,label,mode,n,c,secs,ts}]
 const DEFAULT_FOCUS = ['pls','earth','photo','topo','constr'];
 const BPELSG_WEIGHTS = {I:25, II:15, III:30, IV:10, V:20};
+const EXAM_DATE = new Date('2026-11-30T08:00:00');
+const DAY = 86400000;
+const BOX_DAYS = [0, 1, 2, 4, 8];      // Leitner boxes compressed to fit before the exam
+const WINDOW = 10;                     // proficiency = last 10 attempts in a topic
+const REASONS = {method:'Method unknown', ref:'Not in reference', arith:'Arithmetic / units', misread:'Misread question', time:'Guessed / time'};
 
-function histLoad(){ try{ return JSON.parse(localStorage.getItem(HIST_KEY)||'{}')||{}; }catch(e){ return {}; } }
-function histSave(h){ try{ localStorage.setItem(HIST_KEY, JSON.stringify(h)); }catch(e){} }
-function focusLoad(){ try{ const f = JSON.parse(localStorage.getItem(FOCUS_KEY)||'null'); return Array.isArray(f) ? f : DEFAULT_FOCUS.slice(); }catch(e){ return DEFAULT_FOCUS.slice(); } }
-function focusSave(f){ try{ localStorage.setItem(FOCUS_KEY, JSON.stringify(f)); }catch(e){} }
+function jget(k, d){ try{ const v = JSON.parse(localStorage.getItem(k)||'null'); return v==null ? d : v; }catch(e){ return d; } }
+function jset(k, v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){} }
+function histLoad(){ return jget(HIST_KEY, {}); }
+function histSave(h){ jset(HIST_KEY, h); }
+function focusLoad(){ const f = jget(FOCUS_KEY, null); return Array.isArray(f) ? f : DEFAULT_FOCUS.slice(); }
+function focusSave(f){ jset(FOCUS_KEY, f); }
+function logLoad(){ const l = jget(LOG_KEY, []); return Array.isArray(l) ? l : []; }
+function logSave(l){ if(l.length > 6000) l = l.slice(l.length-6000); jset(LOG_KEY, l); }
+function sessLoad(){ const s = jget(SESS_KEY, []); return Array.isArray(s) ? s : []; }
+function sessSave(s){ jset(SESS_KEY, s.slice(-200)); }
+function daysToExam(){ return Math.max(0, Math.ceil((EXAM_DATE - Date.now())/DAY)); }
+function qById(id){ return ALL_Q.find(q=>q.id===id); }
+function plainStem(q, n){ const d = document.createElement('div'); d.innerHTML = (q && q.stem) || ''; return (d.textContent||'').replace(/\s+/g,' ').trim().slice(0, n||70); }
 
-/* record one answered question (called once per question per session) */
+/* ---- record one answered question (once per question per session) ---- */
 function histRecord(qd, pq){
   if(!qd || !pq || pq.recorded || pq.selected===null) return;
   const h = histLoad();
@@ -1158,141 +1185,375 @@ function histRecord(qd, pq){
   const ok = (pq.selected===pq.correct) && !pq.revealedBeforePick;
   r.a += 1; if(ok) r.c += 1;
   r.last = Date.now(); r.lc = ok;
+  const box = ok ? Math.min((r.box||0)+1, BOX_DAYS.length-1) : 0;
+  r.box = box; r.due = Date.now() + BOX_DAYS[box]*DAY;
+  r.secs = Math.round(pq.timeSpent||0);
   h[qd.id] = r; histSave(h);
+  const log = logLoad();
+  log.push({id:qd.id, ts:Date.now(), ok, s:r.secs, topic:qd.topic, cat:qd.cat, sid:(cbtState&&cbtState.sid)||0});
+  logSave(log);
   pq.recorded = true;
 }
 function histRecordSession(){
   if(!cbtState) return;
   cbtState.perQuestion.forEach((pq,i)=>histRecord(cbtState.questions[i], pq));
 }
+function setMissReason(qid, sid, why){
+  const log = logLoad();
+  for(let i=log.length-1;i>=0;i--){ if(String(log[i].id)===String(qid) && log[i].sid===sid){ log[i].why = why; break; } }
+  logSave(log);
+  const h = histLoad(); if(h[qid]){ h[qid].why = why; histSave(h); }
+}
 
 function shuffle(a){ for(let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; } return a; }
 function poolNoDup(){ return ALL_Q.filter(q=>!q.duplicate_of); }
+function pct(c,a){ return a ? Math.round(100*c/a) : null; }
 
+/* ---- aggregate stats (all-time) ---- */
 function statsBy(key){
   const h = histLoad(); const out = {};
   poolNoDup().forEach(q=>{
     const k = q[key] || '?';
-    const s = out[k] || (out[k] = {n:0, tried:0, a:0, c:0, missed:0});
+    const s = out[k] || (out[k] = {n:0, tried:0, a:0, c:0, missed:0, due:0});
     s.n++;
     const r = h[q.id];
-    if(r){ s.tried++; s.a += r.a; s.c += r.c; if(r.lc===false) s.missed++; }
+    if(r){ s.tried++; s.a += r.a; s.c += r.c; if(r.lc===false) s.missed++; if(r.due!=null && r.due<=Date.now()) s.due++; }
   });
   return out;
 }
-function pct(c,a){ return a ? Math.round(100*c/a) : null; }
 
-/* weakest topics: focus topics + any topic with >=5 attempts and <70% */
-function weakTopics(){
-  const focus = focusLoad();
-  const st = statsBy('topic');
-  const auto = Object.entries(st)
-    .filter(([t,s])=>s.a>=5 && pct(s.c,s.a)<70)
-    .sort((x,y)=>pct(x[1].c,x[1].a)-pct(y[1].c,y[1].a))
-    .slice(0,3).map(([t])=>t);
-  return Array.from(new Set(focus.concat(auto)));
+/* ---- proficiency per topic from the last WINDOW attempts ---- */
+function topicProficiency(){
+  const log = logLoad(); const by = {};
+  for(const e of log){ (by[e.topic] = by[e.topic] || []).push(e); }
+  const h = histLoad(); const out = {};
+  const ts = statsBy('topic');
+  Object.keys(TOPICS).forEach(t=>{
+    let recent = (by[t]||[]).slice(-WINDOW);
+    let n = recent.length, c = recent.filter(e=>e.ok).length;
+    if(n===0 && ts[t] && ts[t].a){ n = Math.min(ts[t].a, WINDOW); c = Math.round(n*ts[t].c/ts[t].a); }   // older history without a log
+    const prevWin = (by[t]||[]).slice(-2*WINDOW, -WINDOW);
+    const prev = prevWin.length ? Math.round(100*prevWin.filter(e=>e.ok).length/prevWin.length) : null;
+    const acc = n ? Math.round(100*c/n) : null;
+    let level = 'New';
+    if(n>=3) level = acc<60 ? 'Learning' : (acc>=80 && n>=8 ? 'Mastered' : 'Improving');
+    out[t] = {n, c, acc, prev, level};
+  });
+  return out;
 }
 
-function buildDrill(n){
-  const h = histLoad();
-  const topics = weakTopics();
-  const pool = poolNoDup().filter(q=>topics.includes(q.topic));
-  const missed = shuffle(pool.filter(q=>h[q.id] && h[q.id].lc===false));
-  const fresh = shuffle(pool.filter(q=>!h[q.id]));
-  const seen = shuffle(pool.filter(q=>h[q.id] && h[q.id].lc!==false))
-               .sort((a,b)=>(h[a.id].last||0)-(h[b.id].last||0));
-  // up to 40% missed, rest fresh (round-robin across topics), then oldest-seen
-  const out = missed.slice(0, Math.ceil(n*0.4));
-  const byTopic = {}; fresh.forEach(q=>{ (byTopic[q.topic]=byTopic[q.topic]||[]).push(q); });
-  const keys = Object.keys(byTopic);
-  let k = 0;
-  while(out.length<n && keys.some(t=>byTopic[t].length)){
-    const t = keys[k++ % keys.length];
-    if(byTopic[t].length) out.push(byTopic[t].shift());
-  }
-  for(const q of missed.slice(Math.ceil(n*0.4)).concat(seen)){ if(out.length>=n) break; if(!out.includes(q)) out.push(q); }
+/* ---- weakest topics (for labels): focus + any topic under 70% ---- */
+function weakTopics(){
+  const focus = focusLoad(); const tp = topicProficiency();
+  const auto = Object.entries(tp).filter(([t,p])=>p.n>=3 && p.level!=='Mastered' && p.acc<70)
+    .sort((x,y)=>x[1].acc-y[1].acc).map(([t])=>t);
+  return Array.from(new Set(focus.filter(t=>!(tp[t]&&tp[t].level==='Mastered')).concat(auto)));
+}
+
+/* ---- question picker inside one topic: due misses → due reviews → fresh → oldest seen ---- */
+function pickInTopic(t, k, taken){
+  const h = histLoad(); const now = Date.now();
+  const pool = poolNoDup().filter(q=>q.topic===t && !taken.has(q.id));
+  const dueMiss = pool.filter(q=>h[q.id] && h[q.id].lc===false && (h[q.id].due==null || h[q.id].due<=now)).sort((a,b)=>(h[a.id].last||0)-(h[b.id].last||0));
+  const dueRev  = pool.filter(q=>h[q.id] && h[q.id].lc!==false && h[q.id].due!=null && h[q.id].due<=now).sort((a,b)=>h[a.id].due-h[b.id].due);
+  const fresh   = shuffle(pool.filter(q=>!h[q.id]));
+  const seen    = pool.filter(q=>h[q.id] && !(dueMiss.includes(q)||dueRev.includes(q))).sort((a,b)=>(h[a.id].last||0)-(h[b.id].last||0));
+  const out = [];
+  for(const q of dueMiss.concat(dueRev, fresh, seen)){ if(out.length>=k) break; out.push(q); taken.add(q.id); }
+  return out;
+}
+function topicCat(t){ const c = {}; poolNoDup().forEach(q=>{ if(q.topic===t) c[q.cat]=(c[q.cat]||0)+1; }); return Object.entries(c).sort((a,b)=>b[1]-a[1])[0]?.[0]; }
+
+/* ---- SMART DRILL: topic weights from need × focus × exam weight ---- */
+function topicWeights(){
+  const tp = topicProficiency(); const focus = focusLoad(); const w = {};
+  const avail = {}; poolNoDup().forEach(q=>{ avail[q.topic]=(avail[q.topic]||0)+1; });
+  Object.keys(avail).forEach(t=>{
+    const p = tp[t] || {n:0,c:0,level:'New'};
+    let need;
+    if(p.level==='Mastered') need = 0.1;
+    else if(p.n===0) need = focus.includes(t) ? 0.5 : 0.08;   // untried: sample for coverage
+    else need = (1 - (p.c+1)/(p.n+2)) * (p.level==='Learning' ? 2.5 : 1.2);  // smoothed error rate, weak topics boosted
+    const ew = (BPELSG_WEIGHTS[topicCat(t)]||15)/20;
+    w[t] = need * (focus.includes(t) ? 1.6 : 1) * ew;
+  });
+  return w;
+}
+function buildSmart(n){
+  const w = topicWeights(); const tot = Object.values(w).reduce((a,b)=>a+b,0)||1;
+  const alloc = Object.entries(w).map(([t,x])=>({t, raw:n*x/tot})).map(o=>({...o, k:Math.floor(o.raw), frac:o.raw-Math.floor(o.raw)}));
+  let left = n - alloc.reduce((a,o)=>a+o.k,0);
+  alloc.sort((a,b)=>b.frac-a.frac).forEach(o=>{ if(left>0){ o.k++; left--; } });
+  const taken = new Set(); let out = [];
+  alloc.sort((a,b)=>w[b.t]-w[a.t]).forEach(o=>{ if(o.k) out = out.concat(pickInTopic(o.t, o.k, taken)); });
+  if(out.length<n){ const extra = Object.keys(w).sort((a,b)=>w[b]-w[a]); for(const t of extra){ if(out.length>=n) break; out = out.concat(pickInTopic(t, n-out.length, taken)); } }
   return shuffle(out.slice(0,n));
 }
-
+function buildTopicDrill(t, n){ return shuffle(pickInTopic(t, n, new Set())); }
+function dueQuestions(){
+  const h = histLoad(); const now = Date.now();
+  return poolNoDup().filter(q=>h[q.id] && h[q.id].due!=null && h[q.id].due<=now).sort((a,b)=>(h[a.id].lc===false?0:1)-(h[b.id].lc===false?0:1));
+}
+function buildDrill(n){ return buildSmart(n); }   // keep old name working
 function buildMock(n){
   const out = [];
   const byCat = {}; shuffle(poolNoDup().filter(q=>q.cat)).forEach(q=>{ (byCat[q.cat]=byCat[q.cat]||[]).push(q); });
   const cats = Object.keys(BPELSG_WEIGHTS);
   let counts = cats.map(c=>Math.round(n*BPELSG_WEIGHTS[c]/100));
-  let diff = n - counts.reduce((a,b)=>a+b,0); counts[2] += diff;   // remainder to III
+  let diff = n - counts.reduce((a,b)=>a+b,0); counts[2] += diff;
   cats.forEach((c,i)=>{ out.push(...(byCat[c]||[]).slice(0,counts[i])); });
   return shuffle(out);
 }
-
-function missedQuestions(){
-  const h = histLoad();
-  return shuffle(poolNoDup().filter(q=>h[q.id] && h[q.id].lc===false));
-}
+function missedQuestions(){ const h = histLoad(); return shuffle(poolNoDup().filter(q=>h[q.id] && h[q.id].lc===false)); }
 
 function launchQuestions(qs, label){
   if(!qs.length){ alert('No questions available for ' + label + ' yet.'); return; }
+  window.__sessLabel = label;
   showSplashModal(qs);
 }
 
+/* ---- session start / submit (redefine with session ids) ---- */
+function cbtStartExam(questions, mode){
+  cbtState = cbtFreshState(questions, mode);
+  cbtState.sid = Date.now();
+  cbtState.label = window.__sessLabel || 'Custom filter session';
+  cbtState.profBefore = topicProficiency();
+  window.__sessLabel = null;
+  cbtState.perQuestion[0].lastEnteredAt = cbtState.startedAt;
+  document.getElementById('filter-view').style.display='none';
+  document.getElementById('cbt-view').style.display='block';
+  cbtStartTicker();
+  cbtRender();
+}
+function cbtSubmitTest(){
+  const unanswered = cbtState.perQuestion.filter(q=>q.selected===null).length;
+  if(unanswered>0){ if(!confirm(unanswered + ' question(s) still unanswered. Submit anyway?')) return; }
+  const cur = cbtState.perQuestion[cbtState.current];
+  if(cur.lastEnteredAt){ cur.timeSpent += (Date.now()-cur.lastEnteredAt)/1000; cur.lastEnteredAt=null; }
+  cbtState.finishedAt = Date.now();
+  cbtState.phase = 'results';
+  histRecordSession();
+  const s = cbtComputeStats();
+  const sess = sessLoad(); sess.push({sid:cbtState.sid, label:cbtState.label, mode:cbtState.mode, n:cbtState.N, c:s.totalCorrect, secs:Math.round(s.totalTime), ts:Date.now()}); sessSave(sess);
+  if(cbtTickHandle){ clearInterval(cbtTickHandle); cbtTickHandle=null; }
+  cbtRender();
+}
+
+/* ---- results page (redefined): misses with reason tags, proficiency change, retry, report ---- */
+function cbtRenderResults(){
+  const s = cbtComputeStats();
+  const N = cbtState.N;
+  const blindPct = s.blindTotal ? Math.round(100*s.blindCorrect/s.blindTotal) : 0;
+  const overallPct = Math.round(100*s.totalCorrect/N);
+  const log = logLoad();
+  const whyOf = (id)=>{ for(let i=log.length-1;i>=0;i--){ if(log[i].id===id && log[i].sid===cbtState.sid) return log[i].why||''; } return ''; };
+  const opts = (cur)=>'<option value="">why?</option>'+Object.entries(REASONS).map(([k,v])=>`<option value="${k}" ${cur===k?'selected':''}>${v}</option>`).join('');
+  const rows = cbtState.perQuestion.map((q,idx)=>{
+    const isCorrect = q.selected!==null && q.selected===q.correct && !q.revealedBeforePick;
+    const qd = cbtState.questions[idx];
+    return `<tr class="${isCorrect?'':'rs-miss'}">
+      <td>${idx+1}</td>
+      <td>${qd.source}<div class="rs-topic">${TOPICS[qd.topic]||qd.topic||''}</div></td>
+      <td>${q.selected!==null ? CBT_LETTERS[q.selected] : '—'}</td>
+      <td>${CBT_LETTERS[q.correct]}</td>
+      <td><span class="cbt-tag ${isCorrect?'cbt-correct':'cbt-incorrect'}">${isCorrect?'Correct':(q.selected===null?'Skipped':'Incorrect')}</span>${q.revealed?'<span class="cbt-tag cbt-assisted">Assisted</span>':''}${q.flagged?'<span class="cbt-tag cbt-flagged">Flagged</span>':''}</td>
+      <td>${cbtFmtTime(q.timeSpent)}</td>
+      <td>${(isCorrect || q.selected===null) ? '' : `<select class="rs-why" data-qid="${qd.id}">${opts(whyOf(qd.id))}</select>`}</td>
+      <td><button class="cbt-review-row-btn" data-review="${idx}">Review</button></td>
+    </tr>`;
+  }).join('');
+  const nMiss = cbtState.perQuestion.filter((q,i)=>cbtIsMiss(i) || q.revealedBeforePick).length;
+  return `
+    <div class="cbt-results">
+      <h2>Session Results <small class="rs-label">${cbtState.label||''}</small></h2>
+      <div class="cbt-score-row">
+        <div class="cbt-score-card cbt-blind"><div class="cbt-big">${blindPct}%</div><div class="cbt-lbl">Blind accuracy (${s.blindCorrect}/${s.blindTotal})</div></div>
+        <div class="cbt-score-card cbt-assisted"><div class="cbt-big">${overallPct}%</div><div class="cbt-lbl">Overall (${s.totalCorrect}/${N}), incl. ${s.assistedTotal} assisted</div></div>
+        <div class="cbt-score-card cbt-time"><div class="cbt-big">${cbtFmtTime(s.totalTime)}</div><div class="cbt-lbl">Total time (avg ${cbtFmtTime(s.avgTime)}/question)</div></div>
+      </div>
+      ${nMiss ? `<p class="rs-hint">Tag each miss with <b>why</b> (right column). The tags drive what gets fixed: method → lesson + new variants; reference → fix the cheat sheet; arithmetic/misread → habit drills.</p>` : ''}
+      ${rsProficiencyTable()}
+      <table class="cbt-stat-table">
+        <thead><tr><th>#</th><th>Source / topic</th><th>Your answer</th><th>Correct</th><th>Result</th><th>Time</th><th>Why missed</th><th></th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <div class="cbt-results-actions">
+        ${nMiss ? `<button class="cbt-toolbtn rs-primary" id="rs-retry-btn">Retry my ${nMiss} miss${nMiss===1?'':'es'} now</button>` : ''}
+        <button class="cbt-toolbtn rs-primary" id="rs-next-btn">Next smart drill (20 Q)</button>
+        <button class="cbt-toolbtn" id="rs-report-btn">Copy report for Claude</button>
+        <button class="cbt-toolbtn" id="cbt-review-all-btn" style="font-weight:700">Review answers &amp; solutions</button>
+        <button class="cbt-toolbtn" id="cbt-review-miss-btn" style="font-weight:700">Review wrong / skipped only</button>
+        <button class="cbt-toolbtn" id="cbt-export-results-btn">Export results</button>
+        <button class="cbt-toolbtn" id="cbt-restart-btn">Back to filters</button>
+      </div>
+      <textarea id="rs-report-box" class="rs-report" readonly style="display:none"></textarea>
+    </div>`;
+}
+const LEVEL_CLS = {New:'lv-new', Learning:'lv-learn', Improving:'lv-imp', Mastered:'lv-mast'};
+function levelBadge(l){ return `<span class="lv ${LEVEL_CLS[l]||''}">${l}</span>`; }
+function rsProficiencyTable(){
+  const before = cbtState.profBefore || {}; const after = topicProficiency();
+  const agg = {};
+  cbtState.perQuestion.forEach((q,i)=>{ const t = cbtState.questions[i].topic; const s = agg[t] || (agg[t]={n:0,c:0}); s.n++; if(q.selected!==null && q.selected===q.correct && !q.revealedBeforePick) s.c++; });
+  const rows = Object.entries(agg).sort((a,b)=>(a[1].c/a[1].n)-(b[1].c/b[1].n)).map(([t,s])=>{
+    const b = before[t]||{}, a = after[t]||{};
+    const arrow = (b.acc==null||a.acc==null) ? '' : (a.acc>b.acc ? ' ▲' : a.acc<b.acc ? ' ▼' : '');
+    return `<tr><td>${TOPICS[t]||t}</td><td>${s.c}/${s.n}</td><td>${b.level?levelBadge(b.level):''} → ${levelBadge(a.level||'New')}</td><td>${a.acc==null?'—':a.acc+'%'}${arrow}</td></tr>`;
+  }).join('');
+  return `<table class="cbt-stat-table" style="margin-bottom:18px"><thead><tr><th>Topic (this session, weakest first)</th><th>This session</th><th>Level before → after</th><th>Last-${WINDOW} accuracy</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+function cbtAttachResultsEvents(){
+  document.querySelectorAll('#cbt-view [data-review]').forEach(el=>{
+    el.addEventListener('click', ()=>{ cbtState.phase = 'exam'; cbtEnterQuestion(parseInt(el.dataset.review)); });
+  });
+  document.querySelectorAll('#cbt-view .rs-why').forEach(sel=>{
+    sel.addEventListener('change', ()=>setMissReason(sel.dataset.qid, cbtState.sid, sel.value));
+  });
+  const ra = document.getElementById('cbt-review-all-btn');
+  if(ra) ra.addEventListener('click', ()=>{ cbtState.wrongOnly=false; cbtState.phase='exam'; cbtEnterQuestion(0); });
+  const rm = document.getElementById('cbt-review-miss-btn');
+  if(rm) rm.addEventListener('click', ()=>{ cbtState.wrongOnly=true; cbtState.phase='exam'; let f=0; for(let i=0;i<cbtState.N;i++){ if(cbtIsMiss(i)){ f=i; break; } } cbtEnterQuestion(f); });
+  const rt = document.getElementById('rs-retry-btn');
+  if(rt) rt.addEventListener('click', ()=>{
+    const qs = cbtState.questions.filter((q,i)=>cbtIsMiss(i) || cbtState.perQuestion[i].revealedBeforePick);
+    const mode = cbtState.mode; cbtQuitSilently(); window.__sessLabel = 'Retry of misses'; cbtStartExam(shuffle(qs.slice()), mode);
+  });
+  const nx = document.getElementById('rs-next-btn');
+  if(nx) nx.addEventListener('click', ()=>{ const mode = cbtState.mode; cbtQuitSilently(); window.__sessLabel = 'Smart drill · 20 Q'; cbtStartExam(buildSmart(20), mode); });
+  const rp = document.getElementById('rs-report-btn');
+  if(rp) rp.addEventListener('click', ()=>copyReport(sessionReport(), document.getElementById('rs-report-box')));
+  const exportBtn = document.getElementById('cbt-export-results-btn');
+  if(exportBtn) exportBtn.addEventListener('click', cbtExportProgress);
+  const restartBtn = document.getElementById('cbt-restart-btn');
+  if(restartBtn) restartBtn.addEventListener('click', cbtQuit);
+}
+function cbtQuitSilently(){ if(cbtTickHandle){ clearInterval(cbtTickHandle); cbtTickHandle=null; } cbtState = null; }
+
+/* ---- reports (plain text, paste into Claude) ---- */
+function fmtDate(ts){ const d = new Date(ts); return d.toISOString().slice(0,10)+' '+d.toTimeString().slice(0,5); }
+function reasonCounts(filterFn){
+  const c = {}; logLoad().filter(e=>!e.ok && (!filterFn || filterFn(e))).forEach(e=>{ const k = e.why||'untagged'; c[k]=(c[k]||0)+1; });
+  return Object.entries(c).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`${k} ${v}`).join(', ') || 'none';
+}
+function profLines(only){
+  const tp = topicProficiency(); const focus = focusLoad();
+  return Object.entries(tp).filter(([t,p])=>p.n>0 && (!only || only.includes(t)))
+    .sort((a,b)=>(a[1].acc??101)-(b[1].acc??101))
+    .map(([t,p])=>`- ${TOPICS[t]||t}${focus.includes(t)?' ★':''}: ${p.level} ${p.acc}% (last ${p.n})${p.prev!=null?`, was ${p.prev}%`:''}`).join('\n');
+}
+function sessionReport(){
+  const s = cbtComputeStats(); const log = logLoad();
+  const L = [];
+  L.push(`CES SIMULATOR REPORT — session ${fmtDate(cbtState.sid)} · exam in ${daysToExam()} days`);
+  L.push(`Session: ${cbtState.label}${/\d+ Q$/.test(cbtState.label||'')?'':' · '+cbtState.N+' Q'} · ${cbtState.mode} mode · ${s.totalCorrect}/${cbtState.N} correct (${Math.round(100*s.totalCorrect/cbtState.N)}%) · ${cbtFmtTime(s.totalTime)} total, ${Math.round(s.avgTime)} s/Q`);
+  const skipped = cbtState.perQuestion.filter(q=>q.selected===null).length;
+  L.push(''); L.push('WRONG ANSWERS (id · topic · picked/correct · time · why · stem):');
+  cbtState.perQuestion.forEach((q,i)=>{
+    if(q.selected===null || !(cbtIsMiss(i) || q.revealedBeforePick)) return;
+    const qd = cbtState.questions[i];
+    let why = ''; for(let k=log.length-1;k>=0;k--){ if(log[k].id===qd.id && log[k].sid===cbtState.sid){ why = log[k].why||''; break; } }
+    L.push(`- ${qd.id} · ${TOPICS[qd.topic]||qd.topic} · ${q.selected!==null?CBT_LETTERS[q.selected]:'-'}/${CBT_LETTERS[q.correct]} · ${cbtFmtTime(q.timeSpent)} · ${why||'untagged'} · "${plainStem(qd, 80)}"`);
+  });
+  if(skipped) L.push(`Skipped (not graded, not recorded): ${skipped}`);
+  const topics = Array.from(new Set(cbtState.questions.map(q=>q.topic)));
+  L.push(''); L.push('PROFICIENCY, topics in this session (last 10 attempts):'); L.push(profLines(topics));
+  L.push(''); L.push('Miss reasons this session: ' + reasonCounts(e=>e.sid===cbtState.sid));
+  L.push('Miss reasons all time: ' + reasonCounts());
+  L.push(`Due for review now: ${dueQuestions().length} questions`);
+  return L.join('\n');
+}
+function overallReport(){
+  const h = histLoad(); const tp = topicProficiency(); const sess = sessLoad();
+  const L = [];
+  L.push(`CES SIMULATOR PROGRESS REPORT — ${fmtDate(Date.now())} · exam in ${daysToExam()} days`);
+  const lv = {New:0, Learning:0, Improving:0, Mastered:0}; Object.values(tp).forEach(p=>{ if(p.n>0) lv[p.level]++; });
+  L.push(`Attempted ${Object.keys(h).length} distinct questions · topics: ${lv.Mastered} mastered, ${lv.Improving} improving, ${lv.Learning} learning`);
+  const cs = statsBy('cat');
+  L.push('By BPELSG area: ' + Object.keys(BPELSG_WEIGHTS).map(c=>`${c} ${pct((cs[c]||{}).c,(cs[c]||{}).a)??'-'}%`).join(' · '));
+  L.push(''); L.push('PROFICIENCY by topic (weakest first, last 10 attempts):'); L.push(profLines());
+  L.push(''); L.push('Miss reasons all time: ' + reasonCounts());
+  L.push(''); L.push('LAST SESSIONS: ' + sess.slice(-8).map(x=>`${fmtDate(x.ts).slice(5,10)} ${x.label.replace(/ ·.*/,'')} ${x.c}/${x.n}`).join(' | '));
+  L.push(''); L.push('CURRENTLY MISSED (by topic, up to 12 each):');
+  const miss = {}; poolNoDup().forEach(q=>{ if(h[q.id] && h[q.id].lc===false) (miss[q.topic]=miss[q.topic]||[]).push(q); });
+  Object.entries(miss).sort((a,b)=>b[1].length-a[1].length).forEach(([t,qs])=>{
+    L.push(`- ${TOPICS[t]||t} (${qs.length}): ` + qs.slice(0,12).map(q=>q.id+(h[q.id].why?`[${h[q.id].why}]`:'')).join(', '));
+  });
+  return L.join('\n');
+}
+function copyReport(text, box){
+  if(box){ box.style.display='block'; box.value = text; box.select(); }
+  const done = ()=>{ if(box){ box.insertAdjacentHTML('beforebegin', '<p class="rs-copied">Report copied — paste it into the chat with Claude.</p>'); } };
+  if(navigator.clipboard && navigator.clipboard.writeText){ navigator.clipboard.writeText(text).then(done).catch(()=>{ try{ document.execCommand('copy'); done(); }catch(e){} }); }
+  else { try{ document.execCommand('copy'); done(); }catch(e){} }
+}
+
+/* ---- progress panel on the start page ---- */
 function renderProgressPanel(){
   const el = document.getElementById('progress-panel'); if(!el) return;
-  const h = histLoad();
-  const focus = focusLoad();
+  const h = histLoad(); const focus = focusLoad(); const tp = topicProficiency(); const ts = statsBy('topic'); const cs = statsBy('cat');
   const nTried = Object.keys(h).length;
   const nMissed = Object.values(h).filter(r=>r.lc===false).length;
-  const cs = statsBy('cat'), ts = statsBy('topic');
-  const bar = (p)=> p===null ? '<span class="pg-na">not tried</span>'
-      : `<span class="pg-bar"><span class="pg-fill ${p<60?'pg-bad':p<75?'pg-mid':'pg-good'}" style="width:${p}%"></span></span><span class="pg-pct">${p}%</span>`;
+  const nDue = dueQuestions().length;
+  const lv = {New:0, Learning:0, Improving:0, Mastered:0}; Object.entries(tp).forEach(([t,p])=>{ if(ts[t]) lv[p.level]++; });
+  const bar = (p)=> p===null||p===undefined ? '<span class="pg-na">not tried</span>'
+      : `<span class="pg-bar"><span class="pg-fill ${p<60?'pg-bad':p<80?'pg-mid':'pg-good'}" style="width:${p}%"></span></span><span class="pg-pct">${p}%</span>`;
   const catRows = Object.entries(CATS).map(([c,name])=>{
     const s = cs[c]||{n:0,tried:0,a:0,c:0};
     return `<tr><td><b>${c}</b> ${name} <small>(${BPELSG_WEIGHTS[c]}% of exam)</small></td><td>${s.tried}/${s.n}</td><td>${bar(pct(s.c,s.a))}</td></tr>`;
   }).join('');
-  const weak = weakTopics();
-  const topicRows = Object.entries(TOPICS)
-    .filter(([t])=>ts[t])
+  const order = {Learning:0, Improving:1, New:2, Mastered:3};
+  const topicRows = Object.entries(TOPICS).filter(([t])=>ts[t])
     .sort((x,y)=>{
-      const px = pct(ts[x[0]].c, ts[x[0]].a), py = pct(ts[y[0]].c, ts[y[0]].a);
-      const fx = focus.includes(x[0]) ? 0 : 1, fy = focus.includes(y[0]) ? 0 : 1;
-      if(fx!==fy) return fx-fy;
-      return (px===null?101:px) - (py===null?101:py);
+      const fx = focus.includes(x[0])?0:1, fy = focus.includes(y[0])?0:1; if(fx!==fy) return fx-fy;
+      const px = tp[x[0]], py = tp[y[0]];
+      if(order[px.level]!==order[py.level]) return order[px.level]-order[py.level];
+      return (px.acc??101)-(py.acc??101);
     })
     .map(([t,name])=>{
-      const s = ts[t];
+      const s = ts[t], p = tp[t];
       const star = focus.includes(t) ? '★' : '☆';
-      return `<tr class="${weak.includes(t)?'pg-weak':''}"><td><span class="pg-star" data-focus="${t}" title="Mark/unmark as a focus area">${star}</span> ${name}</td><td>${s.tried}/${s.n}</td><td>${bar(pct(s.c,s.a))}</td><td>${s.missed?s.missed+' missed':''}</td></tr>`;
+      const trend = (p.prev==null||p.acc==null) ? '' : (p.acc>p.prev ? ` <span class="pg-up">▲${p.acc-p.prev}</span>` : p.acc<p.prev ? ` <span class="pg-dn">▼${p.prev-p.acc}</span>` : '');
+      return `<tr><td><span class="pg-star" data-focus="${t}" title="Mark/unmark as a focus area">${star}</span> ${name}</td><td>${levelBadge(p.level)}</td><td>${bar(p.acc)}${trend}</td><td>${s.tried}/${s.n}</td><td>${s.due?s.due+' due':''}</td><td><button class="pg-mini" data-tdrill="${t}">Drill 10</button></td></tr>`;
     }).join('');
   el.innerHTML = `
-    <p class="section-label">My progress &amp; weak areas</p>
-    <p class="pg-sub">${nTried} questions attempted so far on this device · ${nMissed} currently missed. ★ = focus area (click a star to change). Drill sessions pull from ★ topics plus any topic you're scoring under 70% on.</p>
+    <p class="section-label">My progress &amp; adaptive drill · <span class="pg-days">exam in ${daysToExam()} days</span></p>
+    <p class="pg-sub">${nTried} questions attempted · ${nMissed} currently missed · <b>${nDue} due for review</b> · topics: ${levelBadge('Mastered')} ${lv.Mastered} · ${levelBadge('Improving')} ${lv.Improving} · ${levelBadge('Learning')} ${lv.Learning}.
+    <b>Smart drill</b> weights each topic by your recent error rate (last ${WINDOW} attempts), ★ focus and BPELSG exam weight; mastered topics fade out. Missed questions return next session, then after 1, 2, 4 and 8 days once you get them right.</p>
     <div class="pg-actions">
-      <button class="primary" data-drill="20">Drill weak areas · 20 Q</button>
-      <button class="primary" data-drill="40">Drill weak areas · 40 Q</button>
+      <button class="primary" data-smart="20">Smart drill · 20 Q</button>
+      <button class="primary" data-smart="40">Smart drill · 40 Q</button>
+      <button class="ghost" id="pg-due">Due reviews (${nDue})</button>
       <button class="ghost" id="pg-missed">Retry missed (${nMissed})</button>
       <button class="ghost" id="pg-mock">Mock exam · 55 Q by BPELSG weights</button>
+      <button class="ghost" id="pg-report">Copy progress report for Claude</button>
     </div>
-    <details class="pg-details" open><summary>By BPELSG content area</summary>
-      <table class="pg-table"><thead><tr><th>Area</th><th>Tried</th><th>Accuracy</th></tr></thead><tbody>${catRows}</tbody></table>
+    <textarea id="pg-report-box" class="rs-report" readonly style="display:none"></textarea>
+    <details class="pg-details" open><summary>By topic (focus first, then Learning → Improving → New → Mastered)</summary>
+      <table class="pg-table"><thead><tr><th>Topic</th><th>Level</th><th>Last-${WINDOW} accuracy</th><th>Tried</th><th>Review</th><th></th></tr></thead><tbody>${topicRows}</tbody></table>
     </details>
-    <details class="pg-details"><summary>By topic (focus areas first, then weakest)</summary>
-      <table class="pg-table"><thead><tr><th>Topic</th><th>Tried</th><th>Accuracy</th><th></th></tr></thead><tbody>${topicRows}</tbody></table>
+    <details class="pg-details"><summary>By BPELSG content area (all-time)</summary>
+      <table class="pg-table"><thead><tr><th>Area</th><th>Tried</th><th>Accuracy</th></tr></thead><tbody>${catRows}</tbody></table>
     </details>
     <div class="pg-actions pg-small">
       <button class="ghost" id="pg-export">Export history</button>
       <button class="ghost" id="pg-import">Import history</button>
       <input type="file" id="pg-import-input" accept="application/json" style="display:none">
       <button class="ghost" id="pg-reset">Reset history</button>
-      <span class="pg-sub">History is saved in this browser. Use export/import to move it between your iPad and computer.</span>
+      <span class="pg-sub">History is saved in this browser. Use export/import to move it between devices.</span>
     </div>`;
-  el.querySelectorAll('[data-drill]').forEach(b=>b.onclick=()=>launchQuestions(buildDrill(parseInt(b.dataset.drill)),'the weak-area drill'));
-  el.querySelector('#pg-missed').onclick=()=>launchQuestions(missedQuestions(),'missed questions');
-  el.querySelector('#pg-mock').onclick=()=>{ setMode('exam'); launchQuestions(buildMock(55),'the mock exam'); };
+  el.querySelectorAll('[data-smart]').forEach(b=>b.onclick=()=>launchQuestions(buildSmart(parseInt(b.dataset.smart)),'Smart drill · '+b.dataset.smart+' Q'));
+  el.querySelectorAll('[data-tdrill]').forEach(b=>b.onclick=()=>launchQuestions(buildTopicDrill(b.dataset.tdrill,10),'Topic drill · '+(TOPICS[b.dataset.tdrill]||b.dataset.tdrill)));
+  el.querySelector('#pg-due').onclick=()=>launchQuestions(dueQuestions().slice(0,40),'Due reviews');
+  el.querySelector('#pg-missed').onclick=()=>launchQuestions(missedQuestions(),'Retry missed');
+  el.querySelector('#pg-mock').onclick=()=>{ setMode('exam'); launchQuestions(buildMock(55),'Mock exam · 55 Q'); };
+  el.querySelector('#pg-report').onclick=()=>copyReport(overallReport(), el.querySelector('#pg-report-box'));
   el.querySelectorAll('[data-focus]').forEach(s=>s.onclick=()=>{
     let f = focusLoad(); const t = s.dataset.focus;
     f = f.includes(t) ? f.filter(x=>x!==t) : f.concat([t]);
     focusSave(f); renderProgressPanel();
   });
   el.querySelector('#pg-export').onclick=()=>{
-    const blob = new Blob([JSON.stringify({history:histLoad(), focus:focusLoad(), exported:new Date().toISOString()},null,1)],{type:'application/json'});
+    const blob = new Blob([JSON.stringify({history:histLoad(), focus:focusLoad(), log:logLoad(), sessions:sessLoad(), exported:new Date().toISOString()},null,1)],{type:'application/json'});
     const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='ces_history.json'; a.click();
   };
   el.querySelector('#pg-import').onclick=()=>el.querySelector('#pg-import-input').click();
@@ -1304,14 +1565,16 @@ function renderProgressPanel(){
         Object.entries(d.history||{}).forEach(([id,r])=>{
           const cur=h[id];
           if(!cur) h[id]=r;
-          else { cur.a+=r.a; cur.c+=r.c; if((r.last||0)>(cur.last||0)){ cur.last=r.last; cur.lc=r.lc; } }
+          else { cur.a+=r.a; cur.c+=r.c; if((r.last||0)>(cur.last||0)){ cur.last=r.last; cur.lc=r.lc; cur.box=r.box; cur.due=r.due; cur.why=r.why; } }
         });
         histSave(h); if(Array.isArray(d.focus)) focusSave(d.focus);
+        if(Array.isArray(d.log)){ const seen = new Set(logLoad().map(e=>e.id+'|'+e.ts)); logSave(logLoad().concat(d.log.filter(e=>!seen.has(e.id+'|'+e.ts))).sort((a,b)=>a.ts-b.ts)); }
+        if(Array.isArray(d.sessions)){ const seen = new Set(sessLoad().map(x=>x.sid)); sessSave(sessLoad().concat(d.sessions.filter(x=>!seen.has(x.sid))).sort((a,b)=>a.ts-b.ts)); }
         renderProgressPanel(); alert('History imported and merged.');
       }catch(e){ alert('Could not read that history file.'); }
     }; rd.readAsText(file);
   };
-  el.querySelector('#pg-reset').onclick=()=>{ if(confirm('Erase all saved progress on this device?')){ histSave({}); renderProgressPanel(); } };
+  el.querySelector('#pg-reset').onclick=()=>{ if(confirm('Erase all saved progress on this device?')){ histSave({}); logSave([]); sessSave([]); renderProgressPanel(); } };
 }
 
 buildFilterUI();

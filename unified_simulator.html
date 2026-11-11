@@ -422,6 +422,8 @@ img.diagram{display:block;max-width:100%;border:1px solid var(--line);border-rad
 .rs-report{width:100%;height:220px;font:12px/1.4 monospace;margin-top:8px;background:#fafafa}
 .rs-copied{color:#1f6b28;font-weight:600;margin:10px 0 0}
 .cbt-results{overflow-x:auto}
+.pg-sync{font-size:.85rem;margin:-2px 0 10px;padding:7px 10px;border-radius:6px;background:#f4f8fc;border:1px solid #cfe0f1}
+.pg-sync-on{color:#1f6b28;font-weight:600}.pg-sync-off{color:#555}.pg-sync-err{color:#a12626;font-weight:600}
 .pg-sub{font-size:.85rem;color:var(--sub,#555);margin:4px 0 10px}
 .pg-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:8px 0 14px}
 .pg-actions button{padding:9px 14px;border-radius:8px;cursor:pointer;font-size:.92rem}
@@ -1217,7 +1219,7 @@ function statsBy(key){
     const s = out[k] || (out[k] = {n:0, tried:0, a:0, c:0, missed:0, due:0});
     s.n++;
     const r = h[q.id];
-    if(r){ s.tried++; s.a += r.a; s.c += r.c; if(r.lc===false) s.missed++; if(r.due!=null && r.due<=Date.now()) s.due++; }
+    if(r){ s.tried++; s.a += r.a; s.c += r.c; if(r.lc===false) s.missed++; if((r.due!=null && r.due<=Date.now()) || (r.lc===false && r.due==null)) s.due++; }
   });
   return out;
 }
@@ -1292,7 +1294,7 @@ function buildSmart(n){
 function buildTopicDrill(t, n){ return shuffle(pickInTopic(t, n, new Set())); }
 function dueQuestions(){
   const h = histLoad(); const now = Date.now();
-  return poolNoDup().filter(q=>h[q.id] && h[q.id].due!=null && h[q.id].due<=now).sort((a,b)=>(h[a.id].lc===false?0:1)-(h[b.id].lc===false?0:1));
+  return poolNoDup().filter(q=>h[q.id] && ((h[q.id].due!=null && h[q.id].due<=now) || (h[q.id].lc===false && h[q.id].due==null))).sort((a,b)=>(h[a.id].lc===false?0:1)-(h[b.id].lc===false?0:1));
 }
 function buildDrill(n){ return buildSmart(n); }   // keep old name working
 function buildMock(n){
@@ -1561,21 +1563,132 @@ function renderProgressPanel(){
     const file=evt.target.files[0]; if(!file) return;
     const rd=new FileReader(); rd.onload=()=>{
       try{
-        const d=JSON.parse(rd.result); const h=histLoad();
-        Object.entries(d.history||{}).forEach(([id,r])=>{
-          const cur=h[id];
-          if(!cur) h[id]=r;
-          else { cur.a+=r.a; cur.c+=r.c; if((r.last||0)>(cur.last||0)){ cur.last=r.last; cur.lc=r.lc; cur.box=r.box; cur.due=r.due; cur.why=r.why; } }
-        });
-        histSave(h); if(Array.isArray(d.focus)) focusSave(d.focus);
-        if(Array.isArray(d.log)){ const seen = new Set(logLoad().map(e=>e.id+'|'+e.ts)); logSave(logLoad().concat(d.log.filter(e=>!seen.has(e.id+'|'+e.ts))).sort((a,b)=>a.ts-b.ts)); }
-        if(Array.isArray(d.sessions)){ const seen = new Set(sessLoad().map(x=>x.sid)); sessSave(sessLoad().concat(d.sessions.filter(x=>!seen.has(x.sid))).sort((a,b)=>a.ts-b.ts)); }
+        const d=JSON.parse(rd.result);
+        const remote={hist:d.hist||d.history||{}, log:d.log||[], sessions:d.sessions||[], focus:Array.isArray(d.focus)?d.focus:focusLoad(), focusTs:d.focusTs||0, resetTs:d.resetTs||0};
+        applyPayload(mergePayload(localPayload(), remote)); scheduleSync(200);
         renderProgressPanel(); alert('History imported and merged.');
       }catch(e){ alert('Could not read that history file.'); }
     }; rd.readAsText(file);
   };
   el.querySelector('#pg-reset').onclick=()=>{ if(confirm('Erase all saved progress on this device?')){ histSave({}); logSave([]); sessSave([]); renderProgressPanel(); } };
 }
+
+/* ===== Cross-device sync via a private GitHub gist ===== */
+const SYNC_KEY = 'cesSync_v1';            // {token, gistId, lastSync, lastErr}
+const FOCUS_TS_KEY = 'cesFocusTs_v1', RESET_TS_KEY = 'cesResetTs_v1';
+const GIST_FILE = 'ces_progress.json', GIST_DESC = 'CES simulator progress (auto-sync)';
+function syncCfg(){ return jget(SYNC_KEY, {}); }
+function syncCfgSave(c){ jset(SYNC_KEY, c); }
+function localPayload(){ return {v:2, hist:histLoad(), log:logLoad(), sessions:sessLoad(), focus:focusLoad(), focusTs:jget(FOCUS_TS_KEY,0), resetTs:jget(RESET_TS_KEY,0), saved:Date.now()}; }
+function mergePayload(a, b){
+  const resetTs = Math.max(a.resetTs||0, b.resetTs||0);
+  const hist = {};
+  [a.hist||{}, b.hist||{}].forEach(src=>Object.entries(src).forEach(([id,r])=>{
+    if((r.last||0) < resetTs) return;
+    const cur = hist[id];
+    if(!cur || (r.last||0) > (cur.last||0) || ((r.last||0)===(cur.last||0) && r.why && !cur.why)) hist[id] = r;
+  }));
+  const lm = new Map();
+  (a.log||[]).concat(b.log||[]).forEach(e=>{ if(e.ts < resetTs) return; const k = e.id+'|'+e.ts; if(!lm.has(k) || (e.why && !lm.get(k).why)) lm.set(k, e); });
+  const sm = new Map();
+  (a.sessions||[]).concat(b.sessions||[]).forEach(x=>{ if((x.ts||0) >= resetTs) sm.set(x.sid, x); });
+  const useA = (a.focusTs||0) >= (b.focusTs||0);
+  return {v:2, hist, log:Array.from(lm.values()).sort((x,y)=>x.ts-y.ts), sessions:Array.from(sm.values()).sort((x,y)=>x.ts-y.ts),
+          focus: useA ? a.focus : b.focus, focusTs: Math.max(a.focusTs||0, b.focusTs||0), resetTs, saved:Date.now()};
+}
+function applyPayload(p){ histSave(p.hist); logSave(p.log); sessSave(p.sessions); if(Array.isArray(p.focus)) jset(FOCUS_KEY, p.focus); jset(FOCUS_TS_KEY, p.focusTs||0); jset(RESET_TS_KEY, p.resetTs||0); }
+async function gh(path, opt){
+  const c = syncCfg(); opt = opt || {};
+  const headers = {'Authorization':'token '+c.token, 'Accept':'application/vnd.github+json'};
+  if(opt.body) headers['Content-Type'] = 'application/json';
+  const r = await fetch('https://api.github.com'+path, Object.assign({}, opt, {headers, cache:'no-store'}));
+  if(!r.ok) throw new Error(r.status===401 ? 'token rejected (expired or mistyped)' : r.status===404 ? 'gist not found (token needs the "gist" scope)' : 'GitHub error '+r.status);
+  return r.json();
+}
+async function findGist(){
+  const list = await gh('/gists?per_page=100');
+  const g = list.find(x=>x.description===GIST_DESC && x.files && x.files[GIST_FILE]);
+  return g ? g.id : null;
+}
+async function pullRemote(id){
+  const g = await gh('/gists/'+id);
+  const f = g.files && g.files[GIST_FILE]; if(!f) return null;
+  let txt = f.content;
+  if(f.truncated){ txt = await (await fetch(f.raw_url, {cache:'no-store'})).text(); }
+  try{ return JSON.parse(txt); }catch(e){ return null; }
+}
+let syncBusy = false, syncAgain = false, syncTimer = null;
+function scheduleSync(ms){ if(!syncCfg().token) return; clearTimeout(syncTimer); syncTimer = setTimeout(syncNow, ms==null ? 3000 : ms); }
+async function syncNow(){
+  if(!syncCfg().token) return;
+  if(syncBusy){ syncAgain = true; return; }
+  syncBusy = true; setSyncStatus('Syncing…');
+  const c = syncCfg();
+  try{
+    if(!c.gistId) c.gistId = await findGist();
+    const remote = c.gistId ? await pullRemote(c.gistId) : null;
+    const merged = remote ? mergePayload(localPayload(), remote) : localPayload();
+    applyPayload(merged);
+    const files = {}; files[GIST_FILE] = {content: JSON.stringify(merged)};
+    if(c.gistId) await gh('/gists/'+c.gistId, {method:'PATCH', body:JSON.stringify({description:GIST_DESC, files})});
+    else { const g = await gh('/gists', {method:'POST', body:JSON.stringify({description:GIST_DESC, public:false, files})}); c.gistId = g.id; }
+    c.lastSync = Date.now(); c.lastErr = '';
+  }catch(e){ c.lastErr = String((e && e.message) || e); }
+  syncCfgSave(c); syncBusy = false;
+  if(syncAgain){ syncAgain = false; return syncNow(); }
+  if(!cbtState) renderProgressPanel(); else setSyncStatus();
+}
+function agoText(ts){ if(!ts) return 'never'; const m = Math.round((Date.now()-ts)/60000); return m<1 ? 'just now' : m<60 ? m+' min ago' : Math.round(m/60)+' h ago'; }
+function syncLine(){
+  const c = syncCfg();
+  if(!c.token) return `<span class="pg-sync-off">Sync is off: progress stays on this device only.</span> <button class="pg-mini" id="pg-sync-setup">Turn on sync across devices</button>`;
+  if(c.lastErr) return `<span class="pg-sync-err">Sync problem: ${c.lastErr}. Progress is safe here and will sync when it works again.</span> <button class="pg-mini" id="pg-sync-now">Try again</button> <button class="pg-mini" id="pg-sync-setup">Re-enter token</button> <button class="pg-mini" id="pg-sync-off">Turn off</button>`;
+  return `<span class="pg-sync-on">✔ Synced across your devices · last sync ${agoText(c.lastSync)}</span> <button class="pg-mini" id="pg-sync-now">Sync now</button> <button class="pg-mini" id="pg-sync-off">Turn off</button>`;
+}
+function setSyncStatus(msg){ const el = document.getElementById('pg-sync'); if(el){ el.innerHTML = msg ? `<span class="pg-sync-on">${msg}</span>` : syncLine(); attachSyncEvents(); } }
+function attachSyncEvents(){
+  const s = document.getElementById('pg-sync-setup');
+  if(s) s.onclick = ()=>{
+    const t = prompt('Paste your GitHub token (starts with ghp_). It is stored only in this browser and used only to read/write your private progress gist.');
+    if(!t) return;
+    const c = syncCfg(); c.token = t.trim(); c.lastErr = ''; syncCfgSave(c); syncNow();
+  };
+  const n = document.getElementById('pg-sync-now'); if(n) n.onclick = ()=>syncNow();
+  const o = document.getElementById('pg-sync-off');
+  if(o) o.onclick = ()=>{ if(confirm('Turn off sync on this device? Your progress here and in the gist is kept.')){ syncCfgSave({}); renderProgressPanel(); } };
+}
+/* hooks: any change schedules a sync; sync on load and when the tab comes back */
+const _histRecord = histRecord;      histRecord = function(qd, pq){ _histRecord(qd, pq); scheduleSync(); };
+const _setMissReason = setMissReason; setMissReason = function(q, s, w){ _setMissReason(q, s, w); scheduleSync(); };
+const _focusSave = focusSave;        focusSave = function(f){ _focusSave(f); jset(FOCUS_TS_KEY, Date.now()); scheduleSync(500); };
+const _renderProgressPanel = renderProgressPanel;
+renderProgressPanel = function(){
+  _renderProgressPanel();
+  const el = document.getElementById('progress-panel'); if(!el) return;
+  if(!document.getElementById('pg-sync')){ const d = document.createElement('div'); d.id = 'pg-sync'; d.className = 'pg-sync'; el.insertBefore(d, el.children[1]); }
+  setSyncStatus();
+  const rs = document.getElementById('pg-reset');
+  if(rs) rs.onclick = ()=>{ if(confirm('Erase all saved progress on ALL synced devices?')){ jset(RESET_TS_KEY, Date.now()); histSave({}); logSave([]); sessSave([]); _renderProgressPanel(); setSyncStatus(); scheduleSync(100); } };
+};
+setTimeout(()=>scheduleSync(300), 0);
+document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible' && Date.now()-(syncCfg().lastSync||0) > 30000) scheduleSync(200); });
+/* ---- email/share progress file (manual fallback) ---- */
+async function shareProgress(){
+  const name = 'ces_history_' + new Date().toISOString().slice(0,10) + '.json';
+  const data = JSON.stringify(Object.assign(localPayload(), {history:histLoad(), exported:new Date().toISOString()}));
+  const file = new File([data], name, {type:'application/json'});
+  try{
+    if(navigator.canShare && navigator.canShare({files:[file]})){ await navigator.share({files:[file], title:'CES progress', text:'CES simulator progress — open the simulator on the other device and use Import history.'}); return; }
+  }catch(e){ if(e && e.name==='AbortError') return; }
+  const a = document.createElement('a'); a.href = URL.createObjectURL(file); a.download = name; a.click();
+  alert('Your device can’t attach files from a web page, so the progress file was downloaded instead. Attach "' + name + '" to an email to yourself.');
+}
+const _rpp2 = renderProgressPanel;
+renderProgressPanel = function(){
+  _rpp2();
+  const ex = document.getElementById('pg-export');
+  if(ex && !document.getElementById('pg-share')){ const b = document.createElement('button'); b.className = 'ghost'; b.id = 'pg-share'; b.textContent = 'Email my progress'; b.onclick = shareProgress; ex.parentNode.insertBefore(b, ex); }
+};
 
 buildFilterUI();
 renderProgressPanel();

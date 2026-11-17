@@ -1562,7 +1562,7 @@ function buildReportData(){
       solution_revealed: !!q.revealed, solution_revealed_before_pick: !!q.revealedBeforePick,
       time_spent_seconds: r1(q.timeSpent), first_viewed_at: iso(q.firstViewedAt), last_viewed_at: iso(q.lastViewedAt), answer_submitted_at: iso(q.answeredAt),
       revisits_count: q.visits!=null ? Math.max(0,q.visits-1) : null, answer_changes: q.changes!=null ? q.changes : null,
-      flagged_for_review: !!q.flagged, confidence: null,
+      flagged_for_review: !!q.flagged, confidence: null, idle_seconds_removed: r1(q.idleSeconds||0),
       skip_kind: outcome==='skipped' ? 'opened_but_skipped' : (outcome==='not_reached' ? 'not_reached_reason_unknown' : null),
       reason_codes: why ? [why] : [], reason_labels: why ? [REASONS[why]||why] : [], audit_tags: a.audit ? [a.audit] : [], audit_labels: a.audit ? [AUDIT_TAGS[a.audit]||a.audit] : [], user_note: a.note || null,
       diagram_ref: { question_image: qd.qimg ? id+':qimg (embedded in simulator)' : null, question_html_image: (qd.qhtml && /<img/i.test(qd.qhtml)) ? id+':qhtml (embedded in simulator)' : null, solution_image: qd.simg ? id+':simg (embedded in simulator)' : null },
@@ -1586,7 +1586,7 @@ function buildReportData(){
     const cur = questions.filter(x=>x.topic===t), curAtt = cur.filter(x=>x.selected_choice!==null);
     const ev = log.filter(e=>e.topic===t).sort((a,b)=>a.ts-b.ts);
     const win = n=>{ const w = ev.slice(-n); return {n:w.length, correct:w.filter(e=>e.ok).length, accuracy_pct: w.length ? Math.round(100*w.filter(e=>e.ok).length/w.length) : null, mean_seconds: w.length ? r1(w.reduce((a,e)=>a+(e.s||0),0)/w.length) : null, from: w.length ? iso(w[0].ts) : null, to: w.length ? iso(w[w.length-1].ts) : null}; };
-    return {topic:t, topic_label:TOPICS[t]||t, this_sitting:{served:cur.length, attempted:curAtt.length, correct:curAtt.filter(x=>x.outcome==='correct').length, skipped:cur.filter(x=>x.outcome==='skipped').length, not_reached:cur.filter(x=>x.outcome==='not_reached').length, mean_seconds_attempted: curAtt.length ? r1(curAtt.reduce((a,x)=>a+(x.time_spent_seconds||0),0)/curAtt.length) : null}, last_10_attempted:win(10), last_30_attempted:win(30), lifetime:win(1e9), calc_note:'accuracy = correct/attempted from the simulator attempt log (skipped questions are never logged); window = most recent N logged attempts in the topic'};
+    return {topic:t, topic_label:TOPICS[t]||t, this_sitting:{served:cur.length, attempted:curAtt.length, correct:curAtt.filter(x=>x.outcome==='correct').length, skipped:cur.filter(x=>x.outcome==='skipped').length, not_reached:cur.filter(x=>x.outcome==='not_reached').length, mean_seconds_attempted: curAtt.length ? r1(curAtt.reduce((a,x)=>a+(x.time_spent_seconds||0),0)/curAtt.length) : null}, last_10_attempted:win(10), last_30_attempted:win(30), lifetime:win(1e9), calc_note:'accuracy = correct/logged attempts from the simulator attempt log (opened-but-skipped count as misses since v2.1); window = most recent N logged attempts in the topic'};
   });
   const prior = sess.filter(x=>x.sid!==st.sid).slice(-5).reverse().map(x=>({date:iso(x.ts), session_id:x.sid, label:x.label||null, mode:x.mode||null, served:x.n, attempted:null, correct:x.c, skipped:null, total_seconds:x.secs}));
   const due = dueQuestions().slice(0,40).map(q=>{ const h = hist[q.id]||{}; return {question_id:q.id, topic:TOPICS[q.topic]||q.topic, due_at:iso(h.due), last_outcome:h.lc===true?'correct':(h.lc===false?'incorrect':null), prior_attempts:h.a||0, box:h.box!=null?h.box:null, priority:h.lc===false?'missed':'scheduled'}; });
@@ -1604,7 +1604,7 @@ function buildReportData(){
     score_and_pace: {served, attempted: attempted.length, correct: nCorrect, incorrect: nWrong, skipped: nSkipped, not_reached: nNR, reconciles: (nCorrect+nWrong+nSkipped+nNR===served),
       correct_over_served_pct: served ? r1(100*nCorrect/served) : null, correct_over_attempted_pct: attempted.length ? r1(100*nCorrect/attempted.length) : null,
       blind_correct: questions.filter(x=>x.simulator_counted_correct && !x.solution_revealed).length, assisted_items: questions.filter(x=>x.solution_revealed).length,
-      wall_seconds: r1(wallS), paused_seconds: r1(pausedMs/1000), active_question_seconds: r1(activeS), target_seconds: null, over_under_target_seconds: null,
+      wall_seconds: r1(wallS), paused_seconds: r1(pausedMs/1000), idle_pauses: st.idlePauses||0, idle_seconds_removed: r1(st.idleSeconds||0), active_question_seconds: r1(activeS), target_seconds: null, over_under_target_seconds: null,
       mean_seconds_per_attempted: r1(meanAtt), median_seconds_per_attempted: r1(median(attSecs)), seconds_on_wrong: r1(questions.filter(x=>x.outcome==='incorrect').reduce((a,x)=>a+(x.time_spent_seconds||0),0)), seconds_on_skipped: r1(questions.filter(x=>x.outcome==='skipped').reduce((a,x)=>a+(x.time_spent_seconds||0),0)),
       flagged_count: flagged.length, flagged_correct: flagged.filter(x=>x.outcome==='correct').length, flagged_incorrect: flagged.filter(x=>x.outcome==='incorrect').length, flagged_skipped: flagged.filter(x=>x.outcome==='skipped'||x.outcome==='not_reached').length,
       bottleneck_threshold_seconds: r1(threshold), bottleneck_threshold_rule: threshold!=null ? SLOW_FACTOR+'x mean seconds per attempted question (no per-question target configured)' : 'not computable',
@@ -1612,7 +1612,7 @@ function buildReportData(){
     questions, bottlenecks: bott, topic_stats: topicStats, prior_sessions: prior, due_reviews: due, due_by_topic: dueByTopic,
     repeat_misses: repeated, first_vs_repeat: {first_attempts:fa, first_correct:fc, repeat_attempts:ra, repeat_correct:rc, source:'lifetime attempt log'},
     reference_gaps: gaps, study_queue_advisory: queue,
-    data_quality_notes: ['Not recorded by the simulator: difficulty tag, subtopic, confidence, target time, question-bank version, exact numeric answer/rounding rule, per-question givens/unknowns.','Skipped = opened but no answer chosen; not_reached = never opened. The reason a question was not reached is not recorded.','Attempt-log windows (last 10/30/lifetime) use graded attempts only; skipped questions are never logged.','Times for questions opened before this report version shipped may lack first/last viewed timestamps (shown as null).','Study queue is advisory and computed from this sitting plus tags; it is not ground truth.']
+    data_quality_notes: ['Not recorded by the simulator: difficulty tag, subtopic, confidence, target time, question-bank version, exact numeric answer/rounding rule, per-question givens/unknowns.','Skipped = opened but no answer chosen; not_reached = never opened. The reason a question was not reached is not recorded.','Attempt-log windows (last 10/30/lifetime) count answered questions plus opened-but-skipped ones (logged as misses with sk:true since v2.1; earlier skips were never logged). Never-opened questions are not logged.','Idle auto-pause (v2.1): after 5 min without input the clock pauses and the idle stretch is removed from the question time and reported as idle_seconds_removed; sittings before v2.1 may include idle time in their question times.','Times for questions opened before this report version shipped may lack first/last viewed timestamps (shown as null).','Study queue is advisory and computed from this sitting plus tags; it is not ground truth.']
   };
 }
 function fmtS(x){ return x==null ? 'not recorded' : cbtFmtTime(x)+' ('+Math.round(x)+' s)'; }
@@ -1627,6 +1627,7 @@ function aiReportText(d){
   L.push(`Served ${P.served} = correct ${P.correct} + incorrect ${P.incorrect} + skipped ${P.skipped} + not reached ${P.not_reached} (reconciles: ${P.reconciles})`);
   L.push(`Attempted (answered): ${P.attempted}. Correct/served: ${nv(P.correct_over_served_pct)}% (${P.correct}/${P.served}). Correct/attempted: ${nv(P.correct_over_attempted_pct)}% (${P.correct}/${P.attempted}). Blind-correct: ${P.blind_correct}; solution-revealed items: ${P.assisted_items}.`);
   L.push(`Wall time ${fmtS(P.wall_seconds)} | paused ${fmtS(P.paused_seconds)} | active question time ${fmtS(P.active_question_seconds)} | target: not recorded`);
+  L.push(`Idle auto-pauses: ${P.idle_pauses} (${fmtS(P.idle_seconds_removed)} removed from the clock)`);
   L.push(`Per attempted question: mean ${fmtS(P.mean_seconds_per_attempted)}, median ${fmtS(P.median_seconds_per_attempted)}. Time on wrong: ${fmtS(P.seconds_on_wrong)}; on skipped: ${fmtS(P.seconds_on_skipped)}.`);
   L.push(`Flagged: ${P.flagged_count} (correct ${P.flagged_correct}, incorrect ${P.flagged_incorrect}, skipped/not reached ${P.flagged_skipped})`);
   if(P.mock_projection) L.push(`PROJECTION (not an exam prediction): ${fmtS(P.mock_projection.projected_seconds_at_current_pace)} at this pace vs 150:00 limit.`);
@@ -1668,6 +1669,44 @@ function aiReportDownload(){
   const url = URL.createObjectURL(blob), a = document.createElement('a');
   a.href = url; a.download = 'ces_report_'+d.session.session_id+'.json'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
 }
+
+/* ===== idle auto-pause + skipped-question logging (v2.1) ===== */
+const IDLE_LIMIT_S = 300;   // no click/key/mouse/touch for 5 min during a sitting -> auto-pause; the idle time is removed from the clock
+window.__lastAct = Date.now();
+['click','keydown','mousemove','touchstart','scroll'].forEach(ev=>document.addEventListener(ev, ()=>{ window.__lastAct = Date.now(); }, {passive:true, capture:true}));
+setInterval(function(){
+  if(!cbtState || cbtState.phase!=='exam' || cbtState.finishedAt || cbtState.paused) return;
+  const now = Date.now(), last = window.__lastAct, gap = now - last;
+  if(gap < IDLE_LIMIT_S*1000) return;
+  const cur = cbtState.perQuestion[cbtState.current];
+  cbtTogglePause();                                   // stops the clock (counts time up to now)
+  const g = gap/1000;
+  cur.timeSpent = Math.max(0, cur.timeSpent - g);     // take the idle stretch back out of the question
+  cur.idleSeconds = (cur.idleSeconds||0) + g;
+  cbtState.pausedAt = last;                           // the pause started when you last touched the page
+  cbtState.idlePauses = (cbtState.idlePauses||0) + 1;
+  cbtState.idleSeconds = (cbtState.idleSeconds||0) + g;
+  cbtRender();
+}, 10000);
+(function(){
+  const _hrs = histRecordSession, _start2 = cbtStartExam;
+  cbtStartExam = function(questions, mode){ window.__lastAct = Date.now(); _start2(questions, mode); };
+  histRecordSession = function(){
+    _hrs();
+    if(!cbtState) return;
+    const now = Date.now();
+    cbtState.perQuestion.forEach((pq,i)=>{
+      if(pq.recorded || pq.selected!==null) return;
+      if(!(pq.firstViewedAt!=null || pq.timeSpent>0)) return;      // never opened = not reached, not logged
+      const qd = cbtState.questions[i]; if(!qd) return;
+      const h = histLoad(); const r = h[qd.id] || {a:0, c:0};
+      r.a += 1; r.last = now; r.lc = false; r.box = 0; r.due = now; r.secs = Math.round(pq.timeSpent||0); r.sk = (r.sk||0)+1;
+      h[qd.id] = r; histSave(h);
+      const log = logLoad(); log.push({id:qd.id, ts:now, ok:false, s:r.secs, topic:qd.topic, cat:qd.cat, sid:cbtState.sid, sk:true}); logSave(log);
+      pq.recorded = true;
+    });
+  };
+})();
 
 /* ---- progress panel on the start page ---- */
 function renderProgressPanel(){

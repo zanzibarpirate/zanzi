@@ -1373,6 +1373,7 @@ function cbtRenderResults(){
       <td><span class="cbt-tag ${isCorrect?'cbt-correct':'cbt-incorrect'}">${isCorrect?'Correct':(q.selected===null?'Skipped':'Incorrect')}</span>${q.revealed?'<span class="cbt-tag cbt-assisted">Assisted</span>':''}${q.flagged?'<span class="cbt-tag cbt-flagged">Flagged</span>':''}</td>
       <td>${cbtFmtTime(q.timeSpent)}</td>
       <td>${(isCorrect || q.selected===null) ? '' : `<select class="rs-why" data-qid="${qd.id}">${opts(whyOf(qd.id))}</select>`}</td>
+      <td>${rsAuditCell(qd.id, q.selected===null)}</td>
       <td><button class="cbt-review-row-btn" data-review="${idx}">Review</button></td>
     </tr>`;
   }).join('');
@@ -1388,13 +1389,15 @@ function cbtRenderResults(){
       ${nMiss ? `<p class="rs-hint">Tag each miss with <b>why</b> (right column). The tags drive what gets fixed: method → lesson + new variants; reference → fix the cheat sheet; arithmetic/misread → habit drills.</p>` : ''}
       ${rsProficiencyTable()}
       <table class="cbt-stat-table">
-        <thead><tr><th>#</th><th>Source / topic</th><th>Your answer</th><th>Correct</th><th>Result</th><th>Time</th><th>Why missed</th><th></th></tr></thead>
+        <thead><tr><th>#</th><th>Source / topic</th><th>Your answer</th><th>Correct</th><th>Result</th><th>Time</th><th>Why missed</th><th>Tag / note</th><th></th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
       <div class="cbt-results-actions">
         ${nMiss ? `<button class="cbt-toolbtn rs-primary" id="rs-retry-btn">Retry my ${nMiss} miss${nMiss===1?'':'es'} now</button>` : ''}
         <button class="cbt-toolbtn rs-primary" id="rs-next-btn">${/^No-calc/.test(cbtState.label||'') ? 'Next no-calculator drill (20 Q)' : 'Next smart drill (20 Q)'}</button>
         <button class="cbt-toolbtn" id="rs-report-btn">Copy report for Claude</button>
+        <button class="cbt-toolbtn rs-primary" id="rs-ai-copy-btn">Copy AI Study Report</button>
+        <button class="cbt-toolbtn" id="rs-ai-json-btn">Download JSON</button>
         <button class="cbt-toolbtn" id="cbt-review-all-btn" style="font-weight:700">Review answers &amp; solutions</button>
         <button class="cbt-toolbtn" id="cbt-review-miss-btn" style="font-weight:700">Review wrong / skipped only</button>
         <button class="cbt-toolbtn" id="cbt-export-results-btn">Export results</button>
@@ -1436,6 +1439,11 @@ function cbtAttachResultsEvents(){
   if(nx) nx.addEventListener('click', ()=>{ const mode = cbtState.mode; const th = /^No-calc/.test(cbtState.label||''); cbtQuitSilently(); window.__sessLabel = th ? 'No-calculator drill · 20 Q' : 'Smart drill · 20 Q'; cbtStartExam(th ? buildTheory(20) : buildSmart(20), mode); });
   const rp = document.getElementById('rs-report-btn');
   if(rp) rp.addEventListener('click', ()=>copyReport(sessionReport(), document.getElementById('rs-report-box')));
+  const aiC = document.getElementById('rs-ai-copy-btn'); if(aiC) aiC.addEventListener('click', aiReportCopy);
+  const aiJ = document.getElementById('rs-ai-json-btn'); if(aiJ) aiJ.addEventListener('click', aiReportDownload);
+  document.querySelectorAll('#cbt-view .qa-audit').forEach(sel=>sel.addEventListener('change', ()=>qaSet(cbtState.sid, sel.dataset.qid, {audit: sel.value||null})));
+  document.querySelectorAll('#cbt-view .qa-note').forEach(inp=>inp.addEventListener('change', ()=>qaSet(cbtState.sid, inp.dataset.qid, {note: inp.value.trim()||null})));
+  document.querySelectorAll('#cbt-view .qa-why').forEach(sel=>sel.addEventListener('change', ()=>qaSet(cbtState.sid, sel.dataset.qid, {why: sel.value||null})));
   const exportBtn = document.getElementById('cbt-export-results-btn');
   if(exportBtn) exportBtn.addEventListener('click', cbtExportProgress);
   const restartBtn = document.getElementById('cbt-restart-btn');
@@ -1501,6 +1509,164 @@ function copyReport(text, box){
   const done = ()=>{ if(box){ box.insertAdjacentHTML('beforebegin', '<p class="rs-copied">Report copied — paste it into the chat with Claude.</p>'); } };
   if(navigator.clipboard && navigator.clipboard.writeText){ navigator.clipboard.writeText(text).then(done).catch(()=>{ try{ document.execCommand('copy'); done(); }catch(e){} }); }
   else { try{ document.execCommand('copy'); done(); }catch(e){} }
+}
+
+/* ===== AI Study Report v2 (full per-question ledger, text + JSON) — added per CES_Simulator_Report_Requirements ===== */
+const QA_KEY = 'cesQA_v1';   // sidecar per sitting: {sid:{qid:{why,audit,note}}} (reason for skipped items, audit tags, notes)
+const REPORT_SCHEMA = 'ces-sim-report/2';
+const SLOW_FACTOR = 2;       // bottleneck threshold = 2x mean seconds per attempted question (no per-question target configured)
+const AUDIT_TAGS = {refgap:'Reference sheet missing formula', diagram:'Diagram needed', shortcut:'Shortcut needed', solq:'Solution questionable', choiceq:'Answer choices questionable', roundtrap:'Rounding / constraint trap', calcflow:'Calculator workflow needed'};
+Object.assign(REASONS, {concept:'Concept', setup:'Setup / diagram', refLookup:'Reference lookup', units:'Unit conversion', sign:'Sign / direction', stationing:'Stationing', rounding:'Constraint / rounding', timemgmt:'Time management'});
+function qaLoad(){ const o = jget(QA_KEY, {}); return (o && typeof o==='object' && !Array.isArray(o)) ? o : {}; }
+function qaGet(sid, qid){ const a = qaLoad(); return (a[sid] && a[sid][qid]) || {}; }
+function qaSet(sid, qid, patch){ const a = qaLoad(); a[sid] = a[sid] || {}; a[sid][qid] = Object.assign({}, a[sid][qid]||{}, patch); jset(QA_KEY, a); }
+function plainFull(html){ const d = document.createElement('div'); d.innerHTML = html || ''; return (d.textContent||'').replace(/\s+/g,' ').trim(); }
+function rsAuditCell(qid, skipped){
+  const a = qaGet(cbtState.sid, qid);
+  const opt = (o,cur)=>Object.entries(o).map(([k,v])=>`<option value="${k}" ${cur===k?'selected':''}>${v}</option>`).join('');
+  const why = skipped ? `<select class="rs-why qa-why" data-qid="${qid}"><option value="">why skipped?</option>${opt(REASONS,a.why)}</select><br>` : '';
+  return `${why}<select class="rs-why qa-audit" data-qid="${qid}"><option value="">audit tag</option>${opt(AUDIT_TAGS,a.audit)}</select><br><input class="qa-note" data-qid="${qid}" placeholder="note" value="${(a.note||'').replace(/"/g,'&quot;')}" style="width:150px;font-size:.78rem">`;
+}
+function r1(x){ return x==null ? null : Math.round(x*10)/10; }
+function median(a){ if(!a.length) return null; const s = a.slice().sort((x,y)=>x-y), m = s.length>>1; return s.length%2 ? s[m] : (s[m-1]+s[m])/2; }
+function iso(ts){ return ts==null ? null : new Date(ts).toISOString(); }
+function whyFromLog(qid, sid){ const log = logLoad(); for(let k=log.length-1;k>=0;k--){ if(String(log[k].id)===String(qid) && log[k].sid===sid) return log[k].why || null; } return null; }
+
+/* view tracking (first/last viewed, visits, answered-at) layered over the existing handlers */
+(function(){
+  const _enter = cbtEnterQuestion, _pick = cbtPickAnswer, _start = cbtStartExam;
+  function mark(i){ const q = cbtState && cbtState.perQuestion[i]; if(!q) return; const now = Date.now(); if(q.firstViewedAt==null) q.firstViewedAt = now; q.lastViewedAt = now; q.visits = (q.visits||0)+1; }
+  cbtEnterQuestion = function(i){ _enter(i); if(cbtState && cbtState.phase==='exam' && !cbtState.finishedAt) mark(i); };
+  cbtPickAnswer = function(idx){ const q = cbtState && cbtState.perQuestion[cbtState.current]; const had = q ? q.selected : null; _pick(idx); if(q && !cbtState.finishedAt){ q.answeredAt = Date.now(); q.changes = (q.changes||0) + (had!==null && had!==idx ? 1 : 0); } };
+  cbtStartExam = function(questions, mode){ _start(questions, mode); if(cbtState) mark(0); };
+})();
+
+function buildReportData(){
+  const st = cbtState, pq = st.perQuestion, N = st.N, now = Date.now();
+  const log = logLoad(), hist = histLoad(), sess = sessLoad(), qa = (qaLoad()[st.sid]||{});
+  const ended = st.finishedAt || now;
+  const pausedMs = (st.totalPausedMs||0) + ((st.paused && st.pausedAt) ? now - st.pausedAt : 0);
+  const wallS = (ended - st.startedAt)/1000;
+  const questions = pq.map((q,i)=>{
+    const qd = st.questions[i], id = qd.id, a = qa[id] || {};
+    const viewed = q.firstViewedAt!=null || q.timeSpent>0 || q.selected!==null;
+    const outcome = q.selected!==null ? (q.selected===q.correct ? 'correct' : 'incorrect') : (viewed ? 'skipped' : 'not_reached');
+    const why = whyFromLog(id, st.sid) || a.why || null;
+    const dm = (qd.program && typeof qd.program==='object') ? qd.program : null;
+    return {
+      question_order: i+1, question_id: id, topic: qd.topic||null, topic_label: TOPICS[qd.topic]||null, subtopic: null,
+      bpelsg_area: qd.cat||null, source: qd.source||null, question_type: qd.qtype||null, difficulty: null,
+      stem: plainFull(qd.stem), choices: (qd.choices||[]).map((c,k)=>({letter:CBT_LETTERS[k], text:plainFull(String(c))})),
+      correct_choice: CBT_LETTERS[q.correct]||null, selected_choice: q.selected!==null ? CBT_LETTERS[q.selected] : null,
+      outcome, simulator_counted_correct: (q.selected!==null && q.selected===q.correct && !q.revealedBeforePick),
+      solution_revealed: !!q.revealed, solution_revealed_before_pick: !!q.revealedBeforePick,
+      time_spent_seconds: r1(q.timeSpent), first_viewed_at: iso(q.firstViewedAt), last_viewed_at: iso(q.lastViewedAt), answer_submitted_at: iso(q.answeredAt),
+      revisits_count: q.visits!=null ? Math.max(0,q.visits-1) : null, answer_changes: q.changes!=null ? q.changes : null,
+      flagged_for_review: !!q.flagged, confidence: null,
+      skip_kind: outcome==='skipped' ? 'opened_but_skipped' : (outcome==='not_reached' ? 'not_reached_reason_unknown' : null),
+      reason_codes: why ? [why] : [], reason_labels: why ? [REASONS[why]||why] : [], audit_tags: a.audit ? [a.audit] : [], audit_labels: a.audit ? [AUDIT_TAGS[a.audit]||a.audit] : [], user_note: a.note || null,
+      diagram_ref: { question_image: qd.qimg ? id+':qimg (embedded in simulator)' : null, question_html_image: (qd.qhtml && /<img/i.test(qd.qhtml)) ? id+':qhtml (embedded in simulator)' : null, solution_image: qd.simg ? id+':simg (embedded in simulator)' : null },
+      solution_text: plainFull(qd.solution) || null, solution_id: id+':solution',
+      hp35s_program_match: dm ? {program:dm.prog||null, match:dm.match||null, note:dm.note||null} : null,
+      exact_engineering_value: null, required_rounding: null, units: null
+    };
+  });
+  const served = N, attempted = questions.filter(x=>x.selected_choice!==null);
+  const nCorrect = attempted.filter(x=>x.outcome==='correct').length, nWrong = attempted.length - nCorrect;
+  const nSkipped = questions.filter(x=>x.outcome==='skipped').length, nNR = questions.filter(x=>x.outcome==='not_reached').length;
+  const attSecs = attempted.map(x=>x.time_spent_seconds||0), activeS = questions.reduce((a,x)=>a+(x.time_spent_seconds||0),0);
+  const meanAtt = attSecs.length ? attSecs.reduce((a,b)=>a+b,0)/attSecs.length : null;
+  const isMock = /mock/i.test(st.label||'');
+  const flagged = questions.filter(x=>x.flagged_for_review);
+  const threshold = meanAtt!=null ? SLOW_FACTOR*meanAtt : null;
+  const bott = questions.slice().sort((a,b)=>(b.time_spent_seconds||0)-(a.time_spent_seconds||0)).slice(0,10).map(x=>({question_id:x.question_id, question_order:x.question_order, outcome:x.outcome, seconds:x.time_spent_seconds, topic:x.topic_label, reason:x.reason_codes[0]||null, pct_of_active_time: activeS ? r1(100*(x.time_spent_seconds||0)/activeS) : null, over_threshold: threshold!=null && (x.time_spent_seconds||0)>threshold}));
+  /* topic stats: this sitting, last 10 / last 30 attempted, lifetime (from the attempt log; skipped items are never in the log) */
+  const topics = Array.from(new Set(questions.map(x=>x.topic).filter(Boolean)));
+  const topicStats = topics.map(t=>{
+    const cur = questions.filter(x=>x.topic===t), curAtt = cur.filter(x=>x.selected_choice!==null);
+    const ev = log.filter(e=>e.topic===t).sort((a,b)=>a.ts-b.ts);
+    const win = n=>{ const w = ev.slice(-n); return {n:w.length, correct:w.filter(e=>e.ok).length, accuracy_pct: w.length ? Math.round(100*w.filter(e=>e.ok).length/w.length) : null, mean_seconds: w.length ? r1(w.reduce((a,e)=>a+(e.s||0),0)/w.length) : null, from: w.length ? iso(w[0].ts) : null, to: w.length ? iso(w[w.length-1].ts) : null}; };
+    return {topic:t, topic_label:TOPICS[t]||t, this_sitting:{served:cur.length, attempted:curAtt.length, correct:curAtt.filter(x=>x.outcome==='correct').length, skipped:cur.filter(x=>x.outcome==='skipped').length, not_reached:cur.filter(x=>x.outcome==='not_reached').length, mean_seconds_attempted: curAtt.length ? r1(curAtt.reduce((a,x)=>a+(x.time_spent_seconds||0),0)/curAtt.length) : null}, last_10_attempted:win(10), last_30_attempted:win(30), lifetime:win(1e9), calc_note:'accuracy = correct/attempted from the simulator attempt log (skipped questions are never logged); window = most recent N logged attempts in the topic'};
+  });
+  const prior = sess.filter(x=>x.sid!==st.sid).slice(-5).reverse().map(x=>({date:iso(x.ts), session_id:x.sid, label:x.label||null, mode:x.mode||null, served:x.n, attempted:null, correct:x.c, skipped:null, total_seconds:x.secs}));
+  const due = dueQuestions().slice(0,40).map(q=>{ const h = hist[q.id]||{}; return {question_id:q.id, topic:TOPICS[q.topic]||q.topic, due_at:iso(h.due), last_outcome:h.lc===true?'correct':(h.lc===false?'incorrect':null), prior_attempts:h.a||0, box:h.box!=null?h.box:null, priority:h.lc===false?'missed':'scheduled'}; });
+  const dueByTopic = {}; dueQuestions().forEach(q=>{ const k = TOPICS[q.topic]||q.topic; dueByTopic[k]=(dueByTopic[k]||0)+1; });
+  /* repeated misses and first-attempt vs repeat from the log */
+  const byId = {}; log.forEach(e=>{ (byId[e.id]=byId[e.id]||[]).push(e); });
+  const repeated = Object.entries(byId).filter(([id,es])=>es.filter(e=>!e.ok).length>=2).map(([id,es])=>({question_id:id, attempts:es.length, misses:es.filter(e=>!e.ok).length})).sort((a,b)=>b.misses-a.misses).slice(0,15);
+  let fa=0,fc=0,ra=0,rc=0; Object.values(byId).forEach(es=>{ es.sort((a,b)=>a.ts-b.ts).forEach((e,k)=>{ if(k===0){fa++; if(e.ok) fc++;} else {ra++; if(e.ok) rc++;} }); });
+  const gaps = questions.filter(x=>x.audit_tags.length || x.reason_codes.some(c=>c==='ref'||c==='refLookup')).map(x=>({question_id:x.question_id, tags:x.audit_tags.concat(x.reason_codes.filter(c=>c==='ref'||c==='refLookup')), stem:x.stem, choices:x.choices, correct_choice:x.correct_choice, selected_choice:x.selected_choice, topic:x.topic_label, diagram_ref:x.diagram_ref, simulator_solution_text:x.solution_text, user_note:x.user_note, givens:null, unknown:null, units:null, ambiguity_flag: x.audit_tags.some(t=>t==='solq'||t==='choiceq') ? 'user flagged for manual review; answer key NOT changed' : null}));
+  /* advisory study queue: score = misses + 0.5*skips + slow count, tie-break by lower lifetime accuracy; <3 attempts flagged low-sample */
+  const queue = topicStats.map(ts=>{ const slow = questions.filter(x=>x.topic===ts.topic && x.over_threshold).length; const sl = bott.filter(b=>b.topic===ts.topic_label && b.over_threshold).length; const miss = ts.this_sitting.attempted-ts.this_sitting.correct; const refs = questions.filter(x=>x.topic===ts.topic && x.reason_codes.some(c=>c==='ref'||c==='refLookup')||x.audit_tags.includes('refgap')).length; const concept = questions.filter(x=>x.topic===ts.topic && x.reason_codes.some(c=>c==='method'||c==='concept')).length; return {topic:ts.topic_label, score: miss+0.5*ts.this_sitting.skipped+sl+refs, evidence:{misses:miss, skipped:ts.this_sitting.skipped, not_reached:ts.this_sitting.not_reached, slow_items:sl, tagged_reference_gaps:refs, tagged_concept_or_method:concept, attempted_this_sitting:ts.this_sitting.attempted, lifetime_accuracy_pct:ts.lifetime.accuracy_pct, lifetime_n:ts.lifetime.n}, likely_type: refs>0 ? 'missing reference (per user tags)' : (concept>0 ? 'conceptual/method (per user tags)' : (sl>0 ? 'pacing' : 'untagged')), low_sample: ts.lifetime.n<5}; }).filter(x=>x.score>0).sort((a,b)=>b.score-a.score).slice(0,5);
+  return {
+    schema_version: REPORT_SCHEMA, generated_at: new Date().toString(), generated_at_iso: iso(now), time_zone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    session: {session_id: st.sid, started_at: iso(st.startedAt), ended_at: st.finishedAt ? iso(st.finishedAt) : null, finished: !!st.finishedAt, label: st.label||null, mode: isMock ? 'mock' : (/retry|due|missed/i.test(st.label||'') ? 'review' : (/topic|drill/i.test(st.label||'') ? 'topic_or_smart_drill' : 'mixed_or_custom')), exam_mode: st.mode||null, topic_filter: null, target_time_seconds: null, question_bank_version: null, days_to_exam: daysToExam()},
+    score_and_pace: {served, attempted: attempted.length, correct: nCorrect, incorrect: nWrong, skipped: nSkipped, not_reached: nNR, reconciles: (nCorrect+nWrong+nSkipped+nNR===served),
+      correct_over_served_pct: served ? r1(100*nCorrect/served) : null, correct_over_attempted_pct: attempted.length ? r1(100*nCorrect/attempted.length) : null,
+      blind_correct: questions.filter(x=>x.simulator_counted_correct && !x.solution_revealed).length, assisted_items: questions.filter(x=>x.solution_revealed).length,
+      wall_seconds: r1(wallS), paused_seconds: r1(pausedMs/1000), active_question_seconds: r1(activeS), target_seconds: null, over_under_target_seconds: null,
+      mean_seconds_per_attempted: r1(meanAtt), median_seconds_per_attempted: r1(median(attSecs)), seconds_on_wrong: r1(questions.filter(x=>x.outcome==='incorrect').reduce((a,x)=>a+(x.time_spent_seconds||0),0)), seconds_on_skipped: r1(questions.filter(x=>x.outcome==='skipped').reduce((a,x)=>a+(x.time_spent_seconds||0),0)),
+      flagged_count: flagged.length, flagged_correct: flagged.filter(x=>x.outcome==='correct').length, flagged_incorrect: flagged.filter(x=>x.outcome==='incorrect').length, flagged_skipped: flagged.filter(x=>x.outcome==='skipped'||x.outcome==='not_reached').length,
+      bottleneck_threshold_seconds: r1(threshold), bottleneck_threshold_rule: threshold!=null ? SLOW_FACTOR+'x mean seconds per attempted question (no per-question target configured)' : 'not computable',
+      mock_projection: (isMock && attempted.length && meanAtt) ? {projected_seconds_at_current_pace: r1(meanAtt*served), exam_limit_seconds: 9000, label:'projection at this sitting pace, not an exam prediction'} : null},
+    questions, bottlenecks: bott, topic_stats: topicStats, prior_sessions: prior, due_reviews: due, due_by_topic: dueByTopic,
+    repeat_misses: repeated, first_vs_repeat: {first_attempts:fa, first_correct:fc, repeat_attempts:ra, repeat_correct:rc, source:'lifetime attempt log'},
+    reference_gaps: gaps, study_queue_advisory: queue,
+    data_quality_notes: ['Not recorded by the simulator: difficulty tag, subtopic, confidence, target time, question-bank version, exact numeric answer/rounding rule, per-question givens/unknowns.','Skipped = opened but no answer chosen; not_reached = never opened. The reason a question was not reached is not recorded.','Attempt-log windows (last 10/30/lifetime) use graded attempts only; skipped questions are never logged.','Times for questions opened before this report version shipped may lack first/last viewed timestamps (shown as null).','Study queue is advisory and computed from this sitting plus tags; it is not ground truth.']
+  };
+}
+function fmtS(x){ return x==null ? 'not recorded' : cbtFmtTime(x)+' ('+Math.round(x)+' s)'; }
+function aiReportText(d){
+  const L = [], S = d.session, P = d.score_and_pace, nv = x=>x==null?'not recorded':x;
+  L.push('=== SESSION METADATA ===');
+  L.push(`schema_version: ${d.schema_version} | generated_at: ${d.generated_at} (${d.time_zone}) | session_id: ${S.session_id}`);
+  L.push(`started: ${nv(S.started_at)} | ended: ${S.ended_at||'not finished yet'} | label: ${nv(S.label)} | mode: ${S.mode} | exam_mode: ${nv(S.exam_mode)}`);
+  L.push(`topic filter: not recorded | target time: not recorded | question bank version: not recorded | exam in ${S.days_to_exam} days`);
+  L.push('(captured = direct from simulator; computed = derived below)');
+  L.push(''); L.push('=== SCORE & PACE ===');
+  L.push(`Served ${P.served} = correct ${P.correct} + incorrect ${P.incorrect} + skipped ${P.skipped} + not reached ${P.not_reached} (reconciles: ${P.reconciles})`);
+  L.push(`Attempted (answered): ${P.attempted}. Correct/served: ${nv(P.correct_over_served_pct)}% (${P.correct}/${P.served}). Correct/attempted: ${nv(P.correct_over_attempted_pct)}% (${P.correct}/${P.attempted}). Blind-correct: ${P.blind_correct}; solution-revealed items: ${P.assisted_items}.`);
+  L.push(`Wall time ${fmtS(P.wall_seconds)} | paused ${fmtS(P.paused_seconds)} | active question time ${fmtS(P.active_question_seconds)} | target: not recorded`);
+  L.push(`Per attempted question: mean ${fmtS(P.mean_seconds_per_attempted)}, median ${fmtS(P.median_seconds_per_attempted)}. Time on wrong: ${fmtS(P.seconds_on_wrong)}; on skipped: ${fmtS(P.seconds_on_skipped)}.`);
+  L.push(`Flagged: ${P.flagged_count} (correct ${P.flagged_correct}, incorrect ${P.flagged_incorrect}, skipped/not reached ${P.flagged_skipped})`);
+  if(P.mock_projection) L.push(`PROJECTION (not an exam prediction): ${fmtS(P.mock_projection.projected_seconds_at_current_pace)} at this pace vs 150:00 limit.`);
+  L.push(`Bottlenecks (threshold ${P.bottleneck_threshold_rule}${P.bottleneck_threshold_seconds!=null?' = '+Math.round(P.bottleneck_threshold_seconds)+' s':''}) — time-ranked:`);
+  d.bottlenecks.slice(0,8).forEach(b=>L.push(`  #${b.question_order} ${b.question_id} | ${b.outcome} | ${nv(b.seconds)} s | ${nv(b.topic)} | reason ${b.reason||'untagged'} | ${nv(b.pct_of_active_time)}% of active time${b.over_threshold?' | OVER THRESHOLD':''}`));
+  L.push(''); L.push(`=== COMPLETE QUESTION LEDGER (${d.questions.length} of ${d.questions.length}, none omitted) ===`);
+  d.questions.forEach(q=>{
+    L.push(`[${q.question_order}] id ${q.question_id} | ${nv(q.topic_label)} (area ${nv(q.bpelsg_area)}) | ${nv(q.source)} | ${nv(q.question_type)} | difficulty: not recorded`);
+    L.push(`    outcome: ${q.outcome.toUpperCase()} | selected: ${q.selected_choice||'null'} | correct: ${q.correct_choice} | time: ${q.time_spent_seconds==null?'not recorded':q.time_spent_seconds+' s'} | revisits: ${nv(q.revisits_count)} | flagged: ${q.flagged_for_review} | solution viewed: ${q.solution_revealed}${q.solution_revealed_before_pick?' (before answering)':''}`);
+    L.push(`    first viewed ${nv(q.first_viewed_at)} | last viewed ${nv(q.last_viewed_at)} | submitted ${nv(q.answer_submitted_at)}${q.skip_kind?' | '+q.skip_kind:''}`);
+    L.push(`    reason: ${q.reason_labels.join(', ')||'untagged'} | audit: ${q.audit_labels.join(', ')||'none'}${q.user_note?' | note: '+q.user_note:''}`);
+    L.push(`    STEM: ${q.stem}`);
+    q.choices.forEach(c=>L.push(`      ${c.letter}. ${c.text}`));
+    const dr = q.diagram_ref, imgs = [dr.question_image, dr.question_html_image, dr.solution_image].filter(Boolean);
+    if(imgs.length) L.push(`    diagram: ${imgs.join('; ')}`);
+  });
+  L.push(''); L.push('=== WRONG / UNANSWERED DETAILS ===');
+  const bad = d.questions.filter(q=>q.outcome!=='correct');
+  if(!bad.length) L.push('none');
+  bad.forEach(q=>{ const sol = q.solution_text ? (q.solution_text.length>700 ? q.solution_text.slice(0,700)+' … [abbreviated; full text in JSON]' : q.solution_text) : 'not available'; L.push(`[${q.question_order}] ${q.question_id} ${q.outcome} (picked ${q.selected_choice||'none'}, correct ${q.correct_choice}) — solution: ${sol}`); });
+  L.push(''); L.push('=== TOPIC & SUBTOPIC TRENDS === (subtopic not recorded; topic level only; accuracy = correct/attempted, windows = most recent logged attempts)');
+  d.topic_stats.forEach(t=>{ const w=(x)=>x.n?`${x.accuracy_pct}% (${x.correct}/${x.n}, ${nv(x.mean_seconds)} s avg, ${(x.from||'').slice(0,10)}..${(x.to||'').slice(0,10)})`:'no data'; L.push(`- ${t.topic_label}: this sitting ${t.this_sitting.correct}/${t.this_sitting.attempted} attempted of ${t.this_sitting.served} served (skipped ${t.this_sitting.skipped}, not reached ${t.this_sitting.not_reached}) | last10 ${w(t.last_10_attempted)} | last30 ${w(t.last_30_attempted)} | lifetime ${w(t.lifetime)}`); });
+  L.push('Prior sittings (up to 5):'); if(!d.prior_sessions.length) L.push('  none recorded'); d.prior_sessions.forEach(p=>L.push(`  ${(p.date||'').slice(0,10)} | ${nv(p.label)} | served ${p.served} | correct ${p.correct} | skipped/attempted: not recorded | ${p.total_seconds==null?'not recorded':p.total_seconds+' s'}`));
+  L.push(`Repeat misses (same id, 2+ misses): ${d.repeat_misses.map(r=>r.question_id+' ('+r.misses+'/'+r.attempts+')').join(', ')||'none'}`);
+  L.push(`First vs repeat attempts (lifetime log): first ${d.first_vs_repeat.first_correct}/${d.first_vs_repeat.first_attempts}, repeat ${d.first_vs_repeat.repeat_correct}/${d.first_vs_repeat.repeat_attempts}`);
+  L.push('Advisory study queue (not ground truth):'); if(!d.study_queue_advisory.length) L.push('  no evidence this sitting'); d.study_queue_advisory.forEach((s,i)=>L.push(`  ${i+1}. ${s.topic} — misses ${s.evidence.misses}, skipped ${s.evidence.skipped}, slow ${s.evidence.slow_items}, ref-gap tags ${s.evidence.tagged_reference_gaps}, lifetime ${nv(s.evidence.lifetime_accuracy_pct)}% (n=${s.evidence.lifetime_n}${s.low_sample?', low sample':''}) — likely: ${s.likely_type}`));
+  L.push(''); L.push('=== REFERENCE GAPS ===');
+  if(!d.reference_gaps.length) L.push('none tagged'); d.reference_gaps.forEach(g=>{ L.push(`[${g.question_id}] tags: ${g.tags.join(', ')} | topic ${nv(g.topic)} | correct ${g.correct_choice}, picked ${g.selected_choice||'none'}${g.ambiguity_flag?' | '+g.ambiguity_flag:''}`); L.push(`   STEM: ${g.stem}`); g.choices.forEach(c=>L.push(`     ${c.letter}. ${c.text}`)); L.push(`   givens/unknown/units: not recorded | solution: ${g.simulator_solution_text?(g.simulator_solution_text.length>700?g.simulator_solution_text.slice(0,700)+' …':g.simulator_solution_text):'not available'}${g.user_note?' | note: '+g.user_note:''}`); });
+  L.push(''); L.push('=== DUE REVIEWS ===');
+  L.push(`Due now by topic: ${Object.entries(d.due_by_topic).map(([k,v])=>k+' '+v).join(', ')||'none'}`);
+  d.due_reviews.slice(0,25).forEach(r=>L.push(`  ${r.question_id} | ${r.topic} | due ${(r.due_at||'').slice(0,10)||'now'} | last ${nv(r.last_outcome)} | prior attempts ${r.prior_attempts} | ${r.priority}`));
+  if(d.due_reviews.length>25) L.push(`  (+${d.due_reviews.length-25} more in JSON)`);
+  L.push(''); L.push('=== DATA QUALITY NOTES ==='); d.data_quality_notes.forEach(n=>L.push('- '+n));
+  return L.join('\n');
+}
+function aiReportCopy(){ const d = buildReportData(); copyReport(aiReportText(d), document.getElementById('rs-report-box')); }
+function aiReportDownload(){
+  const d = buildReportData(); const blob = new Blob([JSON.stringify(d, null, 2)], {type:'application/json'});
+  const url = URL.createObjectURL(blob), a = document.createElement('a');
+  a.href = url; a.download = 'ces_report_'+d.session.session_id+'.json'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
 }
 
 /* ---- progress panel on the start page ---- */
